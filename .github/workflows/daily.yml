@@ -2,39 +2,53 @@ name: Daily Quiz Short
 
 on:
   schedule:
-    - cron: "0 8 * * *"  # UTC 8:00, Pakistan time 13:00
-  workflow_dispatch:
+    # Din mein 2 baar start hota hai; asal posting time neeche random delay se random hota hai.
+    - cron: "0 4 * * *"   # window 1: 09:00 PKT se shuru
+    - cron: "0 13 * * *"  # window 2: 18:00 PKT se shuru
+  workflow_dispatch:       # manual run: delay nahi hota, foran chalta hai
+
+env:
+  # Har run is se zyada se zyada itne minute baad post karega (random minutes + seconds).
+  # Private repo ho to free minutes bachane ke liye ise kam kar dein (e.g. 90).
+  MAX_DELAY_MIN: "240"
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 330
     steps:
+      - name: Random wait (sirf scheduled run par)
+        if: github.event_name == 'schedule'
+        run: |
+          DELAY=$(shuf -i 0-$((MAX_DELAY_MIN * 60)) -n 1)
+          echo "Sleeping $((DELAY / 60)) min $((DELAY % 60)) sec before generating and posting"
+          sleep "$DELAY"
+
       - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg and fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Render video
+      - name: Generate quiz (Gemini)
         env:
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python quiz.py
+
+      - name: Render video
         run: python render.py
 
       - name: Upload to YouTube
         env:
-          YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-        run: |
-          echo "$YOUTUBE_CLIENT_SECRET" > client_secret.json
-          echo "$YOUTUBE_TOKEN" | base64 -d > token.pickle
-          python -c "
-          from main import upload_short
-          upload_short('output.mp4', 'Guess the Answer! #Shorts', 'Daily quiz short. #Shorts', ['quiz', 'trivia'])
-          "
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python main.py
