@@ -2,6 +2,9 @@
 
 Female characters ke lambe baal, male ke chhote baal ya ganje. Har scene mein: background, props (pop-in animation),
 characters (chalna, daudna, kudna, sochna, shock...), lip-sync wala munh, label sticker, camera zoom/shake.
+
+LIPSYNC RULE: sirf NARRATOR boy ka munh chalta hai (screen ke corner mein hamesha dikhta hai).
+Baqi sab (female, actor male, animal, object) sirf act karte hain, unka munh kabhi nahi khulta.
 """
 import math
 import os
@@ -151,6 +154,8 @@ class Stage:
         self.s = 1.0 if portrait else 1.15          # prop scale
         self.ground = int(H * (0.725 if portrait else 0.835))
         self.char_h = 640 if portrait else 425      # pehle 470/340 tha: ab characters frame bhar dete hain
+        # narrator corner sprite (chhota, hamesha visible)
+        self.narr_h = 210 if portrait else 150
 
     def char_x(self, n, i):
         """n characters (1 ya 2), i-th ka x."""
@@ -1200,7 +1205,8 @@ def _draw_garment(img, kind, col, hip, sho, f, h, th, t, ph, P, seed, moving):
 
 
 # ------------------------------------------------------------------ face
-def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard):
+def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=False):
+    """closed=True -> lipsync band (sirf emotion se munh). Yeh female/animal/actor par use hota hai."""
     lw = max(2.0, th * 0.36)
     blink = (t + ph) % 3.6 < 0.13
     big = emo in ("surprised", "scared")
@@ -1247,7 +1253,7 @@ def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard):
     my = 0.5 if beard else 0.46
     m = HL(0.18, my)
     wth = max(2.5, th * 0.45)
-    op = mouth
+    op = 0.0 if closed else mouth
     if op > 0.1:
         vis = abs(math.sin(t * 21 + ph))
         mw = (0.19 + 0.11 * op) * (0.85 + 0.3 * vis) * hr
@@ -1323,8 +1329,14 @@ def _confetti(img, W, H, t, seed):
 SLEEVED = ("tunic", "dress", "robe")
 
 
-def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
-    """ch: dict(gender, hair, garment, accessory, color). f = +1 (right) ya -1 (left) dekhta hai."""
+def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, speaks=False):
+    """ch: dict(gender, hair, garment, accessory, color). f = +1 (right) ya -1 (left) dekhta hai.
+
+    speaks=True sirf narrator ke liye: usi ka munh `mouth` se lip-sync karta hai.
+    speaks=False par mouth=0 force hota hai (female / actor male / animal / object kabhi bolte nahi).
+    """
+    if not speaks:
+        mouth = 0.0
     h = st.char_h * scale
     g = ground if ground is not None else st.ground
     P = pose(action, t, ph)
@@ -1432,7 +1444,7 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
     else:  # ganje sar par chamak
         pline(img, [HL(math.cos(math.radians(a)) * 0.78, -math.sin(math.radians(a)) * 0.78) for a in range(138, 96, -8)],
               max(2, th * 0.45), (225, 225, 230))
-    _face(img, HL, hr, th, emo, female, t, ph, mouth, beard)
+    _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=not speaks)
     # ---- accessories
     if acc == "glasses":
         for sgn in (-1, 1):
@@ -1473,6 +1485,30 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
     limb_draw(sho, aFp1, aFp2, hand=True, sleeve=True)
     _fx(img, HL, hc, hr, th, h, f, emo, action, t, ph)
     return hc, hr
+
+
+# ------------------------------------------------------------------ narrator sprite (corner)
+def draw_narrator(st, img, t, mouth, female_hair=False):
+    """Chhota narrator boy corner mein (bottom-left). Sirf usi ka munh narration se lipsync karta hai.
+
+    `female_hair=False` -> chhote baal (male). Ye render.py se hamesha male narrator ke liye call hota hai.
+    """
+    h = st.narr_h
+    W, H = st.W, st.H
+    # corner anchor: short mein bottom-left par thoda oopar (captions se bachne ke liye), long mein neeche
+    cx = W * 0.13
+    gy = H - (H * 0.30 if st.portrait else H * 0.11)
+    # background halo (scene se alag dikhe)
+    fade_circ(img, (cx, gy - h * 0.45), h * 0.62, (245, 242, 232), 0.55)
+    ch = dict(name="Narrator", gender="male", hair="short", garment="tunic", accessory="none", color="yellow")
+    # narrator slight bob + head nod
+    bob = 0.012 * math.sin(t * 4.5)
+    draw_char(st, img, ch, cx, h / st.char_h, "talk", "happy", t, mouth, 1, 0.0, ground=gy, speaks=True)
+    # speech puff (jab munh khula ho)
+    if mouth > 0.25:
+        for k in range(3):
+            fade_circ(img, (cx + h * (0.32 + 0.10 * k), gy - h * (0.78 + 0.03 * k)),
+                      h * (0.03 + 0.02 * k) * (0.6 + mouth), (255, 255, 255), 0.5)
 
 
 # ------------------------------------------------------------------ scene
@@ -1530,15 +1566,18 @@ class SceneRenderer:
             action = "talk"
         emo = sc.get("emotion", "neutral")
         walking = action in ("walk", "run")
+        # FOCUS / OTHER = on-screen ACTORS. Inka munh KABHI nahi khulta (speaks=False).
+        # Lipsync sirf narrator ke corner sprite par hota hai (neeche draw_narrator).
         if two:
             xs = [st.char_x(2, 0), st.char_x(2, 1)]
             oa = sc.get("other_action", "idle")
             draw_char(st, img, cast[int(oi)], xs[1], 0.76, oa if oa != "talk" else "idle",
-                      sc.get("other_emotion", emo if emo in ("surprised", "scared", "happy", "sad", "angry") else "curious"), t, 0.0, -1, 2.1)
-            draw_char(st, img, cast[fi], xs[0], 0.82, action, emo, t, mouth, 1, 0.0)
+                      sc.get("other_emotion", emo if emo in ("surprised", "scared", "happy", "sad", "angry") else "curious"),
+                      t, 0.0, -1, 2.1, speaks=False)
+            draw_char(st, img, cast[fi], xs[0], 0.82, action, emo, t, 0.0, 1, 0.0, speaks=False)
         else:
             f = 1 if (walking or i % 2 == 0) else -1
-            draw_char(st, img, cast[fi], st.char_x(1, 0), 1.0, action, emo, t, mouth, f, 0.0)
+            draw_char(st, img, cast[fi], st.char_x(1, 0), 1.0, action, emo, t, 0.0, f, 0.0, speaks=False)
             if action == "run":  # speed lines
                 for k in range(7):
                     ph = (t * 3.0 + k * 0.37) % 1.0
@@ -1553,6 +1592,8 @@ class SceneRenderer:
             kk = pop_scale(t - 0.35)
             spr = text_sprite(lab.upper(), 46 if not st.portrait else 46, fill=(20, 20, 20), box=(60, 220, 255), max_w=int(st.W * 0.62))
             blit(img, spr, st.W / 2, st.H * (0.078 if not st.portrait else 0.1) + 3 * math.sin(t * 2.5), kk)
+        # NARRATOR corner sprite: sirf iska munh `mouth` se khulta hai (lipsync yahin hota hai)
+        draw_narrator(st, img, t, mouth)
         # camera: narm push-in / pull-out + halka haath ka hilna
         prog = min(t / max(total, 1), 1.0)
         ez = prog * prog * (3 - 2 * prog)
