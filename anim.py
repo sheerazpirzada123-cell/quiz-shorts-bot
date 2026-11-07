@@ -1,10 +1,11 @@
 """Code se bana stick-man animation (koi image API nahi, koi internet nahi, kabhi fail nahi hota).
 
-Female characters ke lambe baal, male ke chhote baal ya ganje. Har scene mein: background, props (pop-in animation),
-characters (chalna, daudna, kudna, sochna, shock...), lip-sync wala munh, label sticker, camera zoom/shake.
-
-LIPSYNC RULE: sirf NARRATOR boy ka munh chalta hai (screen ke corner mein hamesha dikhta hai).
-Baqi sab (female, actor male, animal, object) sirf act karte hain, unka munh kabhi nahi khulta.
+v3 upgrades vs purana:
+- Characters clean aur consistent (fixed palette, saaf hair + garment + accessory).
+- Har scene mein sirf ek clear action, background simple, camera narm (clean cut + chhota push-in).
+- Expressions zyada natural, blink + breath, narrator corner sprite same.
+- LIPSYNC RULE: sirf NARRATOR boy ka munh chalta hai. Baqi sab (female, actor male, animal, object) sirf act karte hain,
+  unka munh kabhi nahi khulta.
 """
 import math
 import os
@@ -97,7 +98,6 @@ def _font(size):
 
 
 def text_sprite(text, size, fill=(255, 255, 255), stroke=(0, 0, 0), sw=None, box=None, max_w=900):
-    """BGRA sprite (cached). box=(r,g,b) rakhne par rounded sticker banta hai."""
     key = (text, size, fill, stroke, box, max_w)
     if key in _spr_cache:
         return _spr_cache[key]
@@ -151,14 +151,12 @@ def blit(img, spr, cx, cy, scale=1.0, alpha=1.0):
 class Stage:
     def __init__(self, W, H, portrait):
         self.W, self.H, self.portrait = W, H, portrait
-        self.s = 1.0 if portrait else 1.15          # prop scale
+        self.s = 1.0 if portrait else 1.15
         self.ground = int(H * (0.725 if portrait else 0.835))
-        self.char_h = 640 if portrait else 425      # pehle 470/340 tha: ab characters frame bhar dete hain
-        # narrator corner sprite (chhota, hamesha visible)
+        self.char_h = 640 if portrait else 425
         self.narr_h = 238 if portrait else 168
 
     def char_x(self, n, i):
-        """n characters (1 ya 2), i-th ka x."""
         if n == 1:
             return self.W * 0.5
         return self.W * ([0.36, 0.72] if self.portrait else [0.37, 0.64])[i]
@@ -172,10 +170,8 @@ class Stage:
         return [(0.12, 1), (0.88, 1), (0.28, 1)] if not self.portrait else [(0.12, 1), (0.88, 1), (0.25, 1)]
 
 
-# ------------------------------------------------------------------ backgrounds
 # ------------------------------------------------------------------ hand-drawn helpers
 def C(r, g, b):
-    """RGB -> BGR."""
     return (int(b), int(g), int(r))
 
 
@@ -187,14 +183,12 @@ def _smooth_noise(rnd, n, amp, passes=2):
 
 
 def _blob(c, r, seed, n=40, amp=0.022, sx=1.0, sy=1.0):
-    """Haath se bana hua thoda tedha gola (har frame par ek jaisa)."""
     nz = _smooth_noise(np.random.RandomState(seed % 100000), n, amp, 1)
     return [(c[0] + math.cos(2 * math.pi * i / n) * r * (1 + nz[i]) * sx,
              c[1] + math.sin(2 * math.pi * i / n) * r * (1 + nz[i]) * sy) for i in range(n)]
 
 
 def _wob(pts, seed, amp=1.5, seg=22.0):
-    """Polygon ke kinare thode wobbly (haath ki line jaisi)."""
     rnd = np.random.RandomState(seed % 100000)
     out, n = [], len(pts)
     for i in range(n):
@@ -220,7 +214,6 @@ def _grad(H, W, top, bot, y0=0, y1=None):
 
 
 def _band(img, W, H, y, amp, fill, out, rnd, ow, n=12, outline=True):
-    """Lehrati hui zameen/pahari ki patti (y se neeche tak bhari hui)."""
     pts = [(x, y + v) for x, v in zip(np.linspace(0, W, n), _smooth_noise(rnd, n, amp, 1))]
     xs = np.linspace(0, W, 70)
     ys = np.interp(xs, [p[0] for p in pts], [p[1] for p in pts])
@@ -256,7 +249,6 @@ W_HALF_HINT = [0]
 
 
 def _rock(img, cx, base_y, w, h, rnd, fill, shade, out, ow=4, cave=False):
-    """Bada sketchy patthar (kabhi kabhi gufa ke munh ke saath), image-3 jaisa."""
     n = 10
     pts = [(cx - w / 2, base_y)]
     for i in range(1, n):
@@ -293,7 +285,7 @@ def _cloud(img, x, y, s, ow=3, fill=WHITE, out=(70, 62, 60)):
 
 def _pine(img, x, y, s, ow):
     for k, (wd, top) in enumerate([(34, 80), (28, 55), (20, 32)]):
-        poly(img, [(x - wd * s, y - (top - 55) * s - 18 * s * k * 0), (x + wd * s, y - (top - 55) * s), (x, y - (top + 35) * s)],
+        poly(img, [(x - wd * s, y - (top - 55) * s), (x + wd * s, y - (top - 55) * s), (x, y - (top + 35) * s)],
              C(70, 130, 95), C(30, 50, 40), max(2, ow - 1))
     rect(img, x - 5 * s, y, x + 5 * s, y + 18 * s, C(120, 80, 50), C(40, 30, 25), 2)
 
@@ -303,8 +295,8 @@ def make_bg(st, kind, seed=0):
     rnd = np.random.RandomState(seed % 100000)
     u = st.s
     ow = 3 if st.portrait else 4
-    hz = g - int(H * (0.15 if st.portrait else 0.19))     # door ki zameen (horizon)
-    gt = g - int(H * 0.03)                                  # saamne ki mitti ka kinara
+    hz = g - int(H * (0.15 if st.portrait else 0.19))
+    gt = g - int(H * 0.03)
     OUT = C(45, 40, 40)
     W_HALF_HINT[0] = W / 2
     vign = 0.0
@@ -436,7 +428,6 @@ def make_bg(st, kind, seed=0):
         _band(img, W, H, g, 3 * u, C(238, 236, 229), C(120, 120, 118), rnd, ow - 1)
         _scratches(img, rnd, 0, W, g + 20, H - 10, 26, C(200, 198, 190), 16 * u)
         _tufts(img, rnd, 0, W, g + 10, g + 60, 10, C(176, 176, 170), 14 * u)
-    # kaagaz/rang ka halka grain + kinare thode gehre
     grain = rnd.normal(0, 2.4, (H, W, 1))
     out_img = np.clip(img.astype(np.float32) + grain, 0, 255)
     if vign > 0:
@@ -478,7 +469,6 @@ def _star5(img, c, r, col, rot=0.0):
 
 
 def _stick_mini(img, x, y, h, t, ph, hair=False):
-    """crowd ke chhote stick men (kood-te hue)."""
     j = abs(math.sin(t * 5 + ph)) * h * 0.18
     y = y - j
     r = h * 0.14
@@ -526,7 +516,7 @@ def prop_cloud(img, x, y, u, t):
     rect(img, x - 0.55 * u, y + 0.1 * u, x + 0.55 * u, y + 0.42 * u, WHITE)
 
 
-def prop_tree(img, x, y, u, t):  # y = ground
+def prop_tree(img, x, y, u, t):
     sw = math.sin(t * 1.5) * 0.03
     rect(img, x - 0.09 * u, y - 0.8 * u, x + 0.09 * u, y, COL["wood"], BLACK, 3)
     for dx, dy, r in [(-0.3, -1.0, 0.42), (0.3, -1.0, 0.42), (0, -1.35, 0.5)]:
@@ -827,7 +817,6 @@ def prop_spear(img, x, y, u, t):
 
 
 def prop_magnifier(img, x, y, u, t):
-    a = 0.1 * math.sin(t * 3)
     cx, cy = x - 0.1 * u + 0.08 * u * math.sin(t * 2), y - 0.1 * u
     line(img, (cx + 0.4 * u, cy + 0.4 * u), (cx + 0.8 * u, cy + 0.8 * u), u * 0.14, COL["wood"])
     circ(img, (cx, cy), 0.5 * u, (250, 240, 215))
@@ -835,7 +824,6 @@ def prop_magnifier(img, x, y, u, t):
     circ(img, (cx, cy), 0.5 * u, BLACK, 2)
 
 
-# name -> (fn, ground?, base size)
 PROP_TABLE = {
     "sun": (prop_sun, False, 95), "moon": (prop_moon, False, 90), "stars": (prop_stars, False, 100), "cloud": (prop_cloud, False, 95),
     "tree": (prop_tree, True, 130), "hut": (prop_hut, True, 130), "cave": (prop_cave, True, 130), "mountain": (prop_mountain, True, 150),
@@ -853,7 +841,6 @@ PROP_TABLE = {
 
 # ------------------------------------------------------------------ character poses
 def _walk_dx(fast, t):
-    """Chalte/daudte character ka x-sarakna (character-height ke hisab se), frame ke andar hi rehta hai."""
     return min(0.29, max(-0.29, -0.29 + (0.20 if fast else 0.07) * t))
 
 
@@ -877,8 +864,7 @@ def pose(action, t, ph):
         amp, kn = (50, 70) if fast else (30, 40)
         P.update(lF=amp * s(f), lB=-amp * s(f), kF=kn * max(0, math.cos(f)), kB=kn * max(0, -math.cos(f)),
                  aF=-(55 if fast else 24) * s(f), eF=(80 if fast else 18), aB=(55 if fast else 24) * s(f), eB=(80 if fast else 18),
-                 lean=14 if fast else 5, dy=(0.03 if fast else 0.012) * abs(s(f)),
-                 dx=_walk_dx(fast, t))
+                 lean=14 if fast else 5, dy=(0.03 if fast else 0.012) * abs(s(f)), dx=_walk_dx(fast, t))
     elif action == "jump":
         u = abs(s(w * 0.8))
         P.update(dy=-0.22 * u + 0.035 * (1 - u) ** 5, aF=20 + 100 * u, eF=20, aB=-20 - 110 * u, eB=-20,
@@ -926,7 +912,6 @@ def _tint(c, k):
 
 
 def _cr(pts, n=6, closed=False):
-    """Catmull-Rom smooth curve through points (naram, saaf lakeerein)."""
     P = list(pts)
     if len(P) < 3:
         return P
@@ -947,7 +932,6 @@ def _cr(pts, n=6, closed=False):
 
 
 def fade_circ(img, c, r, col, alpha):
-    """Aadha-shaffaf gola (dhool ke baadal waghera)."""
     x, y, r = int(c[0]), int(c[1]), int(r) + 3
     H, W = img.shape[:2]
     x0, y0, x1, y1 = max(0, x - r), max(0, y - r), min(W, x + r + 1), min(H, y + r + 1)
@@ -990,7 +974,6 @@ def _hair_col(ch):
 
 # ------------------------------------------------------------------ hair
 def _hair_back(img, HL, hr, th, col, t, ph, trail, seed):
-    """Peeche ke lambe baal (sar aur kamar ke peeche behte hue)."""
     sw = math.sin(t * 2.0 + ph) * 0.20 + trail
 
     def Wp(dx, dy):
@@ -1029,18 +1012,18 @@ def _hair_front(img, HL, hr, th, col, female, style, t, ph):
         fringe = _cr([HL(0.99, -0.18), HL(0.84, -0.40), HL(0.55, -0.60), HL(0.20, -0.68), HL(-0.20, -0.60),
                       HL(-0.60, -0.42), HL(-0.92, -0.05)], 4)
         strands = [[HL(0.1, -1.05), HL(0.5, -0.85), HL(0.82, -0.48)], [HL(-0.3, -1.02), HL(0.05, -0.9), HL(0.3, -0.7)]]
-    elif style == 0:  # khade (spiky) baal
+    elif style == 0:
         outer = arc(1.06, 195, 22, 26, spike=0.22)
         fringe = [HL(0.90, -0.36), HL(0.74, -0.52), HL(0.60, -0.34), HL(0.42, -0.58), HL(0.26, -0.40), HL(0.08, -0.62),
                   HL(-0.20, -0.48), HL(-0.45, -0.62), HL(-0.75, -0.38), HL(-0.92, -0.12)]
         strands = [[HL(0.0, -1.15), HL(0.1, -0.85)], [HL(0.5, -1.05), HL(0.55, -0.72)]]
-    elif style == 1:  # side-part
+    elif style == 1:
         outer = _cr([HL(-1.04, 0.28), HL(-1.13, -0.30), HL(-0.82, -0.86), HL(-0.20, -1.16), HL(0.45, -1.16), HL(0.98, -0.78),
                      HL(1.10, -0.36)], 4)
         fringe = _cr([HL(0.97, -0.28), HL(0.78, -0.48), HL(0.50, -0.64), HL(0.15, -0.60), HL(-0.30, -0.56), HL(-0.70, -0.40),
                       HL(-0.92, -0.10)], 4)
         strands = [[HL(0.35, -1.12), HL(0.30, -0.86), HL(0.18, -0.64)], [HL(-0.3, -1.1), HL(-0.35, -0.8)]]
-    else:  # chhote crop
+    else:
         outer = arc(1.04, 192, 28, 20)
         fringe = _cr([HL(0.93, -0.40), HL(0.60, -0.70), HL(0.0, -0.78), HL(-0.60, -0.66), HL(-0.93, -0.20)], 4)
         strands = []
@@ -1048,7 +1031,6 @@ def _hair_front(img, HL, hr, th, col, female, style, t, ph):
     poly(img, pts, col, None)
     for s_ in strands:
         pline(img, s_, max(2, th * 0.38), _shade(col, 0.7))
-    # chamak ki patti
     ar = [HL(math.cos(math.radians(a)) * 0.84, -math.sin(math.radians(a)) * 0.84) for a in range(132, 66, -8)]
     pline(img, ar, max(2, th * 0.5), _tint(col, 0.34))
     poly(img, pts, None, BLACK, ow)
@@ -1154,8 +1136,8 @@ def _draw_garment(img, kind, col, hip, sho, f, h, th, t, ph, P, seed, moving):
         poly(img, body, col, None)
         poly(img, [TP(1.0, sh_w * 0.25)] + R + hem[:21] + [TP(0.3, wa_w * 0.2)], dark, None)
         wy = TP(0.46, 0)[1]
-        for u in (-0.55, -0.15, 0.3, 0.7):  # skirt ki silwatein
-            pline(img, _cr([(cx2 * 0.0 + TP(0.4, 0)[0] + u * wa_w, wy + 0.01 * h), (cx2 + hw * u * 0.55, hip[1] + 0.2 * h),
+        for u in (-0.55, -0.15, 0.3, 0.7):
+            pline(img, _cr([(TP(0.4, 0)[0] + u * wa_w, wy + 0.01 * h), (cx2 + hw * u * 0.55, hip[1] + 0.2 * h),
                             (cx2 + hw * u * 0.92, hem_y - 0.02 * h)], 4), 2, dark)
         pline(img, [(p[0], p[1] - 0.05 * h) for p in hem[3:-3]], max(3, th * 0.5), light)
         line(img, TP(0.46, -wa_w * 1.02), TP(0.46, wa_w * 1.02), max(4, th * 0.9), light)
@@ -1190,23 +1172,18 @@ def _draw_garment(img, kind, col, hip, sho, f, h, th, t, ph, P, seed, moving):
         for i in range(10):
             u = i / 9.0
             zig.append((xr + (xl - xr) * u + rnd.uniform(-2, 2), hem + (0.05 * h if i % 2 else 0.0) + rnd.uniform(-0.008, 0.01) * h))
-        # ek kandhe wali khaal: ek kandha dhakta hai, tirchi gardan-line, neeche jagged kinara
         pelt = _cr([TP(1.0, -0.092 * h), TP(1.02, -0.03 * h)], 2)[:-1] + [TP(1.0, -0.03 * h), TP(0.74, 0.045 * h),
                                                                          TP(0.5, 0.082 * h), TP(0.22, 0.092 * h), (xr + 0.005 * h, hip[1] + 0.02 * h)]
         pelt += zig + [(xl - 0.005 * h, hip[1] + 0.02 * h), TP(0.36, -0.092 * h), TP(0.7, -0.098 * h)]
         _fur_patch(img, pelt, base, rnd, th, spots)
-        # kandhe ki patti aur kamar ki rassi
         line(img, TP(0.62, 0.05 * h), TP(0.12, 0.095 * h), max(2, th * 0.4), FUR_DARK)
         by = hip[1] + 0.005 * h
         line(img, (xl, by), (xr, by), max(4, th * 0.8), COL["wood"])
         circ(img, (cx + 0.02 * h, by), th * 0.55, COL["gold"])
-    # "none" -> bas stick-man
-    return
 
 
 # ------------------------------------------------------------------ face
 def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=False):
-    """closed=True -> lipsync band (sirf emotion se munh). Yeh female/animal/actor par use hota hai."""
     lw = max(2.0, th * 0.36)
     blink = (t + ph) % 3.6 < 0.13
     big = emo in ("surprised", "scared")
@@ -1231,7 +1208,6 @@ def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=False):
                 for dd in (0.0, 0.13):
                     pline(img, [HL(ex + sgn * (0.15 + dd * 0.5), ey - 0.10 - dd * 0.3), HL(ex + sgn * (0.30 + dd * 0.6), ey - 0.2 - dd * 0.6)],
                           max(2, th * 0.3))
-        # bhaunein
         by = ey - (0.5 if emo in ("surprised", "scared", "excited") else 0.38)
         bw = max(3.0, th * (0.42 if female else 0.62))
         inner, outer = ex - sgn * 0.19, ex + sgn * 0.19
@@ -1244,12 +1220,10 @@ def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=False):
             pline(img, _cr([HL(outer, by + 0.03 + lift), HL(ex, by - 0.04 + lift), HL(inner, by + 0.0 + lift)], 4), bw)
         if emo in ("happy", "excited") or (female and emo in ("neutral", "curious")):
             ell(img, HL(ex + sgn * 0.12, 0.3), (0.15 * hr, 0.085 * hr), 0, 0, 360, C(255, 176, 176))
-    # tears (sad)
     if emo == "sad":
         age = (t * 0.8) % 1.0
         p = HL(0.54, 0.16 + age * 0.9)
         _drop(img, p[0], p[1], 0.09 * hr * (1 - 0.3 * age))
-    # munh
     my = 0.5 if beard else 0.46
     m = HL(0.18, my)
     wth = max(2.5, th * 0.45)
@@ -1280,7 +1254,6 @@ def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=False):
 
 
 def _fx(img, HL, hc, hr, th, h, f, emo, action, t, ph):
-    """Jazbaat ke chhote effects (paseena, shock lines, sochne ke bulbule, ghussa...)."""
     if emo == "scared":
         for k in (0, 1):
             age = (t * 1.1 + k * 0.5) % 1.0
@@ -1331,7 +1304,6 @@ ARM_FREE = ("talk", "idle", "think", "shrug", "point")
 
 
 def _emo_body(P, emo, action, t, ph):
-    """Emotion poora jism badalta hai (sirf chehra nahi): kaanpna, akadna, jhukna, uchhalna."""
     s = math.sin
     w = 2 * math.pi * t
     free = action in ARM_FREE
@@ -1366,7 +1338,7 @@ def _emo_body(P, emo, action, t, ph):
         P["tilt"] += 8
         P["lean"] += 3
         if free and action != "think":
-            P.update(aF=P["aF"], eF=max(P["eF"], 70))
+            P["eF"] = max(P["eF"], 70)
     elif emo == "surprised":
         k = ease_out(t / 0.28)
         P["lean"] -= 9 * k
@@ -1376,34 +1348,31 @@ def _emo_body(P, emo, action, t, ph):
 
 
 def _enter_k(t):
-    """Naye scene mein character halka squash -> stretch -> settle (zinda lage)."""
     if t >= 0.5:
         return 1.0
     return 0.80 + 0.20 * pop_scale(t + 0.05)
 
 
-
 def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, speaks=False):
-    """ch: dict(gender, hair, garment, accessory, color). f = +1 (right) ya -1 (left) dekhta hai.
+    """ch: dict(gender, hair, garment, accessory, color). f = +1 / -1.
 
     speaks=True sirf narrator ke liye: usi ka munh `mouth` se lip-sync karta hai.
     speaks=False par mouth=0 force hota hai (female / actor male / animal / object kabhi bolte nahi).
     """
     if not speaks:
         mouth = 0.0
-    if not speaks:
         scale = scale * _enter_k(t)
     h = st.char_h * scale
     g = ground if ground is not None else st.ground
     P = pose(action, t, ph)
-    if action != "shock":  # naye scene mein jhatke se nahi, narmi se pose mein aao
+    if action != "shock":
         kb = ease_out(t / 0.22)
         if kb < 1.0:
             R = pose("idle", 0.0, ph)
             for key in ("aF", "eF", "aB", "eB", "lF", "kF", "lB", "kB", "lean", "tilt"):
                 P[key] = R[key] + (P[key] - R[key]) * kb
     _emo_body(P, emo, action, t, ph)
-    P["dy"] -= 0.006 * mouth                                    # bolte waqt halka sa uchhalna
+    P["dy"] -= 0.006 * mouth
     P["tilt"] += 2.2 * mouth * math.sin(t * 9 + ph)
     moving = action in ("walk", "run")
     th = max(4.0, 0.022 * h)
@@ -1422,10 +1391,9 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, 
     hcol = _hair_col(ch)
     ca_, sa_ = math.cos(tilt), math.sin(tilt)
 
-    def HL(dx, dy):  # sar ke apne coordinates (aage = +dx, neeche = +dy), jhukav ke saath
+    def HL(dx, dy):
         return (hc[0] + f * (dx * ca_ - dy * sa_) * hr, hc[1] + (dx * sa_ + dy * ca_) * hr)
 
-    # ---- zameen ka saaya + bhaagte waqt dhool
     fx0 = x + P["dx"] * h * f
     sc = tuple(int(c * 0.80) for c in img[min(img.shape[0] - 1, int(g + 4)), int(min(max(x, 0), img.shape[1] - 1))])
     ell(img, (fx0, g + 3), (0.27 * h * (1 - 0.25 * (-P["dy"] if P["dy"] < 0 else 0) * 4), 0.036 * h), 0, 0, 360, sc)
@@ -1441,10 +1409,8 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, 
                 fade_circ(img, (px_, g - 0.02 * h), h * (0.03 + 0.075 * age / 0.45), (232, 232, 232), (1 - age / 0.45) * 0.7)
 
     tr = 0.0045 * P["lean"] * h if moving else 0.0
-    # ---- cape (sab se peeche)
     if garment == "cape":
         _draw_cape(img, sho, hip, f, h, col, t, ph, tr)
-    # ---- peeche ke lambe baal
     if female:
         _hair_back(img, HL, hr, th, hcol, t, ph, (0.38 if action == "run" else 0.2 if action == "walk" else 0.0), seed)
 
@@ -1486,7 +1452,6 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, 
     elif garment == "cape":
         _draw_garment(img, "tunic", C(238, 224, 192), hip, sho, f, h, th, t, ph, P, seed, moving)
 
-    # ---- sar
     circ(img, hc, hr, WHITE)
     beard = acc == "beard"
     if beard:
@@ -1498,11 +1463,10 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, 
     kind_hair = "long" if female else ("none" if ch.get("hair", "short") == "bald" else "short")
     if kind_hair != "none":
         _hair_front(img, HL, hr, th, hcol, female, seed % 3, t, ph)
-    else:  # ganje sar par chamak
+    else:
         pline(img, [HL(math.cos(math.radians(a)) * 0.78, -math.sin(math.radians(a)) * 0.78) for a in range(138, 96, -8)],
               max(2, th * 0.45), (225, 225, 230))
     _face(img, HL, hr, th, emo, female, t, ph, mouth, beard, closed=not speaks)
-    # ---- accessories
     if acc == "glasses":
         for sgn in (-1, 1):
             circ(img, HL(0.16 + sgn * 0.38, -0.06), 0.31 * hr, BLACK, max(2.5, th * 0.4))
@@ -1538,31 +1502,21 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None, 
         ell(img, (hc[0], hc[1] - 0.55 * hr), (1.1 * hr, 0.8 * hr), 0, 180, 360, WHITE)
         ell(img, (hc[0], hc[1] - 0.55 * hr), (1.1 * hr, 0.8 * hr), 0, 180, 360, BLACK, 2)
         circ(img, (hc[0], hc[1] - 0.95 * hr), 0.14 * hr, COL["red"])
-    # ---- samne ka haath
     limb_draw(sho, aFp1, aFp2, hand=True, sleeve=True)
     _fx(img, HL, hc, hr, th, h, f, emo, action, t, ph)
     return hc, hr
 
 
-# ------------------------------------------------------------------ narrator sprite (corner)
-def draw_narrator(st, img, t, mouth, female_hair=False, emo="happy"):
-    """Chhota narrator boy corner mein (bottom-left). Sirf usi ka munh narration se lipsync karta hai.
-
-    `female_hair=False` -> chhote baal (male). Ye render.py se hamesha male narrator ke liye call hota hai.
-    """
+# ------------------------------------------------------------------ narrator sprite
+def draw_narrator(st, img, t, mouth, emo="happy"):
     h = st.narr_h
     W, H = st.W, st.H
-    # corner anchor: short mein bottom-left par thoda oopar (captions se bachne ke liye), long mein neeche
     cx = W * 0.13
     gy = H - (H * 0.30 if st.portrait else H * 0.11)
-    # background halo (scene se alag dikhe)
     fade_circ(img, (cx, gy - h * 0.45), h * 0.62, (245, 242, 232), 0.55)
     ch = dict(name="Narrator", gender="male", hair="short", garment="tunic", accessory="none", color="yellow")
-    # narrator slight bob + head nod
-    bob = 0.012 * math.sin(t * 4.5)
     nemo = emo if emo in ("surprised", "scared", "sad", "angry", "excited", "curious", "happy") else "happy"
     draw_char(st, img, ch, cx, h / st.char_h, "talk", nemo, t, mouth, 1, 0.0, ground=gy, speaks=True)
-    # speech puff (jab munh khula ho)
     if mouth > 0.25:
         for k in range(3):
             fade_circ(img, (cx + h * (0.32 + 0.10 * k), gy - h * (0.78 + 0.03 * k)),
@@ -1570,13 +1524,11 @@ def draw_narrator(st, img, t, mouth, female_hair=False, emo="happy"):
 
 
 # ------------------------------------------------------------------ scene
-# zameen par khade props ko character ke size ke hisab se bada karo (warna tree ke saamne insaan giant lagta hai)
 GROUND_MUL = {"tree": 2.6, "hut": 2.2, "door": 2.4, "castle": 2.0, "cave": 2.0, "mountain": 1.4, "animal": 1.8,
               "crowd": 2.2, "boat": 1.8, "fire": 1.5, "pot": 1.5, "bed": 1.8}
 
 
 def prop_layout(st, props):
-    """Har prop ko position do. Zameen wale props neeche, baaqi upar."""
     out = []
     gs, ss = st.ground_slots(), st.sky_slots()
     gi = si = 0
@@ -1604,7 +1556,6 @@ class SceneRenderer:
         self._mask, self._mask_emo = None, None
 
     def _grade_mask(self, emo):
-        """Vignette + halka rang (BGR gunaa). Emotion ke hisab se: darr = andhera/thanda, ghussa = laal, khushi = garam."""
         if self._mask_emo == emo:
             return self._mask
         H, W = self.st.H, self.st.W
@@ -1620,11 +1571,9 @@ class SceneRenderer:
         return self._mask
 
     def frame(self, sc, cast, i, t, mouth, total):
-        """sc: scene dict, cast: characters list, i: scene index, t: scene ke andar second."""
         st = self.st
         img = self.bg.copy()
         ambient(st, img, self.kind, t, self.seed)
-        # props
         for n, (name, fn, x, y, is_g, base) in enumerate(prop_layout(st, sc.get("props", []))):
             k = pop_scale(t - 0.2 - 0.2 * n)
             if k <= 0:
@@ -1632,7 +1581,6 @@ class SceneRenderer:
             u = base * st.s * k * (GROUND_MUL.get(name, 1.0) * st.char_h / 640.0 if is_g else 1.0)
             yy = y if is_g else y + 7 * math.sin(t * 2 + n)
             fn(img, x, yy, u, t) if name != "chart" else fn(img, x, yy, u, max(0.0, t - 0.2 - 0.2 * n))
-        # characters
         fi = min(max(int(sc.get("focus", 0)), 0), len(cast) - 1)
         oi = sc.get("other")
         two = oi is not None and 0 <= int(oi) < len(cast) and int(oi) != fi
@@ -1641,8 +1589,6 @@ class SceneRenderer:
             action = "talk"
         emo = sc.get("emotion", "neutral")
         walking = action in ("walk", "run")
-        # FOCUS / OTHER = on-screen ACTORS. Inka munh KABHI nahi khulta (speaks=False).
-        # Lipsync sirf narrator ke corner sprite par hota hai (neeche draw_narrator).
         if two:
             xs = [st.char_x(2, 0), st.char_x(2, 1)]
             oa = sc.get("other_action", "idle")
@@ -1653,7 +1599,7 @@ class SceneRenderer:
         else:
             f = 1 if (walking or i % 2 == 0) else -1
             draw_char(st, img, cast[fi], st.char_x(1, 0), 1.0, action, emo, t, 0.0, f, 0.0, speaks=False)
-            if action == "run":  # speed lines
+            if action == "run":
                 for k in range(7):
                     ph = (t * 3.0 + k * 0.37) % 1.0
                     yy = st.ground - st.char_h * (0.12 + 0.8 * ((k * 0.61) % 1.0))
@@ -1661,55 +1607,51 @@ class SceneRenderer:
                     line(img, (x0, yy), (x0 - f * 0.10 * st.W * (1 - ph * 0.5), yy), 3, (96, 96, 96))
         if action == "celebrate":
             _confetti(img, st.W, st.H, t, self.seed)
-        # label sticker
         lab = (sc.get("label") or "").strip()
         if lab:
             kk = pop_scale(t - 0.35)
-            spr = text_sprite(lab.upper(), 46 if not st.portrait else 46, fill=(20, 20, 20), box=(60, 220, 255), max_w=int(st.W * 0.62))
+            spr = text_sprite(lab.upper(), 46, fill=(20, 20, 20), box=(60, 220, 255), max_w=int(st.W * 0.62))
             blit(img, spr, st.W / 2, st.H * (0.078 if not st.portrait else 0.1) + 3 * math.sin(t * 2.5), kk)
-        # NARRATOR corner sprite: sirf iska munh `mouth` se khulta hai (lipsync yahin hota hai)
         draw_narrator(st, img, t, mouth, emo=emo)
-        # camera: narm push-in / pull-out + halka haath ka hilna
+        # camera: halka clean push-in (purana aggressive zoom hata diya)
         prog = min(t / max(total, 1), 1.0)
         ez = prog * prog * (3 - 2 * prog)
-        kind = i % 4
-        zz = 1.0 + 0.08 * ez if kind in (0, 2) else 1.08 - 0.08 * ez
-        if emo in ("sad", "scared", "curious"):
-            zz = 1.0 + 0.13 * ez                      # dheere dheere andar (tension)
+        zoom = 1.0 + 0.045 * ez
+        if emo == "sad":
+            zoom = 1.0 + 0.06 * ez
         elif emo == "surprised":
-            zz = 1.12 - 0.12 * ez                     # peeche hat kar reveal
-        punch = 0.16 if i == 0 else 0.07              # video ke pehle scene mein tez punch-in (hook)
-        zoom = zz * (1.0 + punch * (1 - ease_out(t / (0.5 if i == 0 else 0.4))))
-        dxp = 0.02 * st.W * (prog - 0.5) * (1 if kind == 2 else -1 if kind == 3 else 0)
-        dxp += 2.5 * math.sin(t * 0.9 + i)
-        dyp = 2.0 * math.sin(t * 1.3 + i * 2)
+            zoom = 1.02
+        punch = 0.10 if i == 0 else 0.04
+        zoom *= (1.0 + punch * (1 - ease_out(t / (0.45 if i == 0 else 0.35))))
+        dxp = 1.5 * math.sin(t * 0.6 + i)
+        dyp = 1.2 * math.sin(t * 0.9 + i * 2)
         if emo == "excited":
-            dxp += 3.0 * math.sin(t * 17)
+            dxp += 2.0 * math.sin(t * 14)
         elif emo == "angry":
-            dxp += 4.0 * math.sin(t * 31)
-            dyp += 3.0 * math.sin(t * 27)
-        if action == "shock" and t < 0.7:
-            dxp += 10 * math.sin(t * 60) * (1 - t / 0.7)
+            dxp += 2.5 * math.sin(t * 26)
+            dyp += 2.0 * math.sin(t * 22)
+        if action == "shock" and t < 0.6:
+            dxp += 6 * math.sin(t * 55) * (1 - t / 0.6)
         wipe = 0.0
-        if i > 0 and t < 0.2:  # scene badalte waqt tez whip-pan
-            wipe = (1 - t / 0.2) ** 2
-            dxp += st.W * 0.16 * wipe * (1 if i % 2 == 0 else -1)
+        if i > 0 and t < 0.12:
+            wipe = (1 - t / 0.12) ** 2
+            dxp += st.W * 0.10 * wipe * (1 if i % 2 == 0 else -1)
         ang = 0.0
         if emo == "scared":
-            ang = 1.8 * ez
+            ang = 0.8 * ez
         elif emo == "sad":
-            ang = -1.0 * ez
-        if action == "shock" and t < 0.6:
-            ang += 2.6 * math.sin(t * 45) * (1 - t / 0.6)
+            ang = -0.5 * ez
+        if action == "shock" and t < 0.4:
+            ang += 1.2 * math.sin(t * 50) * (1 - t / 0.4)
         M = cv2.getRotationMatrix2D((st.W / 2, st.H * 0.55), ang, zoom)
         M[0, 2] += dxp
         M[1, 2] += dyp
         out = cv2.warpAffine(img, M, (st.W, st.H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         if wipe > 0.05:
-            kx = int(1 + 36 * wipe) | 1
+            kx = int(1 + 24 * wipe) | 1
             out = cv2.blur(out, (kx, 1))
         out = np.clip(out.astype(np.float32) * self._grade_mask(emo), 0, 255).astype(np.uint8)
-        if (action == "shock" or emo == "surprised") and t < 0.14:   # impact flash
-            a = 0.55 * (1 - t / 0.14)
+        if (action == "shock" or emo == "surprised") and t < 0.10:
+            a = 0.35 * (1 - t / 0.10)
             out = cv2.convertScaleAbs(out, alpha=1 - a, beta=255 * a)
         return out
