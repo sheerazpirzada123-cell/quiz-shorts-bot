@@ -12,6 +12,9 @@ Flow (v2 - "viral" engine):
   4) WRITE   : har chapter alag, ek hi NARRATOR ki awaaz mein (kabhi koi character apni awaaz mein nahi bolta).
   5) POLISH  : "script doctor" pass - hook aur jokes tez karta hai (Short poora, long ka pehla chapter).
 Topic history.json se repeat nahi hote.
+
+LIPSYNC RULE: screen par sirf NARRATOR boy ka munh chalta hai (corner sprite). Female / animal / object / actor
+male characters sirf act karte hain - unka munh kabhi nahi khulta. Isliye prompt mein explicitly likha hai.
 """
 import datetime
 import json
@@ -67,15 +70,16 @@ AREAS = [
     "a forgotten scientific mistake everyone believed for centuries and the moment it finally cracked",
 ]
 
-NARRATOR = """NARRATOR (this is critical): the ENTIRE video is told by ONE single narrator - a witty, curious, slightly dramatic young guy telling his best friend the wildest thing he just learned. Same voice, same personality from the first word to the last.
-- The on-screen stick-man characters NEVER speak in their own voice. The narrator describes what they do, say or think ("And Una's reaction? Pure panic."). If a character's words matter, the narrator quotes them in the same voice ("She basically said: absolutely not.").
+NARRATOR = """NARRATOR (this is critical): the ENTIRE video is told by ONE single narrator - a witty, curious, slightly dramatic young guy telling his best friend the wildest thing he just learned. Same voice, same personality from the first word to the last. His mouth is the ONLY mouth that moves on screen (he appears as a small sprite in the corner).
+- The on-screen story characters NEVER speak in their own voice. The narrator describes what they do, say or think ("And Una's reaction? Pure panic."). If a character's words matter, the narrator quotes them in the same voice ("She basically said: absolutely not.").
+- FEMALE characters, ANIMALS and OBJECTS never move their mouths. They act (run, point, react, dance) but they are silent. Only the narrator's mouth moves. Do not write lines that imply a female character is speaking aloud — always have the narrator report what she said.
 - The narrator may use "I" for his own reactions ("I had to read this twice", "I'm not even joking") and "you" for the viewer. He never changes speaker, gender or persona."""
 
 TTS_RULES = """WRITE FOR THE EAR (a text-to-speech voice reads this): plain spoken words and contractions, commas and full stops to control pacing, a question mark for questions, an exclamation mark only now and then. NO parentheses, dashes, colons, semicolons, slashes, abbreviations, digits or symbols in the narration: spell every number and year as spoken words ("seventeen sixty-three", "forty percent", "two million dollars"). Avoid hard-to-pronounce foreign names unless essential."""
 
 SCENE_RULES = f"""SCENE FIELDS (the animation is drawn by code from these - choose them carefully):
 - narration: 1 or 2 spoken sentences in the narrator's voice (plain text, no emojis/hashtags/stage directions).
-- focus: index (0-based) of the character who is the main actor in this scene (the one on screen doing the thing the narrator describes).
+- focus: index (0-based) of the character who is the main ACTOR in this scene (the one on screen doing the thing the narrator describes). This character NEVER moves its mouth — only the narrator sprite (corner) does.
 - other: index of a SECOND character shown in this scene, or -1 for none. other_action: that character's action (use "idle" for listening).
 - action (what the focus character does): {", ".join(ACTIONS)}. Vary them: NEVER the same action more than twice in a row. Use shock for big reveals, think for questions/mysteries, celebrate for wins, sad for tragedy, run for chases/escapes, walk for journeys, work for building/crafting/digging, dance for fun, hide for danger, point when explaining something, shrug for "nobody knows".
 - emotion: {", ".join(EMOTIONS)} (must match the narration's mood).
@@ -84,7 +88,8 @@ SCENE_RULES = f"""SCENE FIELDS (the animation is drawn by code from these - choo
 - label: OPTIONAL big sticker text (max 4 words, e.g. "1,200 YEARS AGO", "ONLY ONE SURVIVED", a key date/number/name). Use it in about one scene out of four, empty string otherwise."""
 
 CAST_RULES = (
-    "characters: 1 to 3 stick-man characters who appear in the story (they are actors on screen, the narrator does all the talking). "
+    "characters: 1 to 3 stick-man characters who appear in the story as ACTORS on screen (the narrator does all the talking; "
+    "these characters never move their mouths, they only act). "
     "name (one word), gender: male or female (if a woman is "
     "central to the real story, make her female). Female characters automatically get long hair; male characters get hair "
     "\"short\" or \"bald\". garment: " + "/".join(GARMENTS) + " (era-appropriate: loincloth for prehistoric, tunic/robe for ancient, "
@@ -341,6 +346,7 @@ YOUR JOB: rewrite EVERY line so it is funnier, punchier, more vivid and more gri
 HARD RULES:
 - Return EXACTLY {n} lines, same order, one per scene. Each line keeps the FACTS and the meaning of its scene (do not move facts between lines, do not add new facts, do not invent names, dates or numbers).
 - Each line at most {max_words} words. Total length stays within 20 percent of the original.
+- FEMALE characters / animals / objects never speak aloud. If a line needs to quote a woman, write it as the narrator reporting it ("she said, basically: no way"). Never write her as if her mouth is moving.
 - {extra}
 {NARRATOR}
 {STORY_STYLE}
@@ -402,6 +408,36 @@ def clean_scene(s, ncast):
         emotion=s.get("emotion") if s.get("emotion") in EMOTIONS else "neutral",
         bg=s.get("bg") if s.get("bg") in BGS else "white", props=props[:3],
         label=str(s.get("label", "") or "").strip()[:28])
+
+
+# ------------------------------------------------------------------ action-narration sync
+SYNC_MAP = {
+    "run": ["run", "ran", "running", "chase", "chased", "escape", "escaped", "fled", "flee", "dash", "rushed", "sprinted"],
+    "walk": ["walk", "walked", "walking", "marched", "journey", "trek", "wandered"],
+    "jump": ["jump", "jumped", "leap", "leapt", "vaulted", "hopped"],
+    "hide": ["hide", "hid", "hiding", "snuck", "sneak", "crept", "in hiding"],
+    "celebrate": ["celebrate", "celebrated", "won", "winning", "victory", "cheered", "party", "triumph"],
+    "shock": ["shock", "shocked", "stunned", "could not believe", "jaw dropped", "froze", "frozen", "appalled"],
+    "sad": ["sad", "cried", "crying", "grief", "mourned", "died", "death", "tears", "wept"],
+    "think": ["think", "thought", "wondered", "puzzled", "realized", "realised", "scientists", "researchers"],
+    "work": ["work", "worked", "built", "building", "dug", "digging", "wrote", "writing", "crafted", "cooked", "forged"],
+    "dance": ["dance", "danced", "dancing", "partied"],
+    "point": ["pointed", "pointing", "showed", "explained", "declared", "announced"],
+    "shrug": ["shrugged", "no one knows", "nobody knows", "unclear", "mystery", "mysterious"],
+}
+
+
+def sync_action(sc):
+    """Narration ke keywords se action force karo (boring/mismatch na lage). Sirf tab jab action generic ho."""
+    nar = sc["narration"].lower()
+    generic = sc["action"] in ("talk", "idle", "walk", "work", "think", "point", "shrug")
+    if not generic:
+        return sc
+    for act, keys in SYNC_MAP.items():
+        if any(k in nar for k in keys):
+            sc["action"] = act
+            break
+    return sc
 
 
 def spice(scenes):
@@ -492,7 +528,8 @@ LENGTH: about {per} words of narration in total for this chapter, split into 5 t
     assert words >= LONG_TARGET_WORDS * 0.6, "script bohat chhoti"
     d = dict(plan_d)
     d.pop("chapters", None)
-    d["scenes"] = spice(scenes)
+    d["scenes"] = [sync_action(s) for s in scenes]
+    d["scenes"] = spice(d["scenes"])
     d["title"] = re.sub(r"\s*#shorts\s*", " ", d["title"], flags=re.I).strip()[:95]
     d["thumb_text"] = (d.get("thumb_text") or d["topic"]).upper()[:24]
     return d
@@ -541,7 +578,7 @@ COMMON RULES:
     def run():
         d = parse(ask_gemini(prompt, short_schema(), 8192))
         d = common_fields(d)
-        d["scenes"] = [clean_scene(s, len(d["characters"])) for s in d["scenes"]]
+        d["scenes"] = [sync_action(clean_scene(s, len(d["characters"]))) for s in d["scenes"]]
         n = len(d["scenes"])
         words = sum(len(s["narration"].split()) for s in d["scenes"])
         assert (9 if teaser else 8) <= n <= 16, f"scene count {n}"
