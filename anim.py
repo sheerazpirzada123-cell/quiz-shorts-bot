@@ -5,6 +5,7 @@ characters (chalna, daudna, kudna, sochna, shock...), lip-sync wala munh, label 
 """
 import math
 import os
+import zlib
 
 import cv2
 import numpy as np
@@ -167,6 +168,42 @@ class Stage:
 
 
 # ------------------------------------------------------------------ backgrounds
+# ------------------------------------------------------------------ hand-drawn helpers
+def C(r, g, b):
+    """RGB -> BGR."""
+    return (int(b), int(g), int(r))
+
+
+def _smooth_noise(rnd, n, amp, passes=2):
+    a = rnd.uniform(-1, 1, n)
+    for _ in range(passes):
+        a = (np.roll(a, 1) + 2 * a + np.roll(a, -1)) / 4.0
+    return a * amp
+
+
+def _blob(c, r, seed, n=40, amp=0.022, sx=1.0, sy=1.0):
+    """Haath se bana hua thoda tedha gola (har frame par ek jaisa)."""
+    nz = _smooth_noise(np.random.RandomState(seed % 100000), n, amp, 1)
+    return [(c[0] + math.cos(2 * math.pi * i / n) * r * (1 + nz[i]) * sx,
+             c[1] + math.sin(2 * math.pi * i / n) * r * (1 + nz[i]) * sy) for i in range(n)]
+
+
+def _wob(pts, seed, amp=1.5, seg=22.0):
+    """Polygon ke kinare thode wobbly (haath ki line jaisi)."""
+    rnd = np.random.RandomState(seed % 100000)
+    out, n = [], len(pts)
+    for i in range(n):
+        a, b = pts[i], pts[(i + 1) % n]
+        L = math.hypot(b[0] - a[0], b[1] - a[1])
+        k = max(1, int(L / seg))
+        nx, ny = -(b[1] - a[1]) / (L + 1e-6), (b[0] - a[0]) / (L + 1e-6)
+        for j in range(k):
+            tt = j / k
+            o = rnd.uniform(-amp, amp) if j else 0.0
+            out.append((a[0] + (b[0] - a[0]) * tt + nx * o, a[1] + (b[1] - a[1]) * tt + ny * o))
+    return out
+
+
 def _grad(H, W, top, bot, y0=0, y1=None):
     y1 = y1 or H
     a = np.zeros((H, W, 3), np.uint8)
@@ -177,94 +214,252 @@ def _grad(H, W, top, bot, y0=0, y1=None):
     return a
 
 
+def _band(img, W, H, y, amp, fill, out, rnd, ow, n=12, outline=True):
+    """Lehrati hui zameen/pahari ki patti (y se neeche tak bhari hui)."""
+    pts = [(x, y + v) for x, v in zip(np.linspace(0, W, n), _smooth_noise(rnd, n, amp, 1))]
+    xs = np.linspace(0, W, 70)
+    ys = np.interp(xs, [p[0] for p in pts], [p[1] for p in pts])
+    ys = np.convolve(np.r_[[ys[0]] * 3, ys, [ys[-1]] * 3], np.ones(7) / 7, "valid")
+    top = list(zip(xs, ys))
+    poly(img, top + [(W, H), (0, H)], fill, None)
+    if outline:
+        pline(img, top, ow, out)
+
+
+def _tufts(img, rnd, x0, x1, y0, y1, n, col, hgt, w=2):
+    for _ in range(n):
+        x, y = rnd.uniform(x0, x1), rnd.uniform(y0, y1)
+        hh = hgt * rnd.uniform(0.6, 1.3)
+        for dx in (-0.55, 0.0, 0.55):
+            line(img, (x, y), (x + dx * hh * rnd.uniform(0.5, 1.1), y - hh * rnd.uniform(0.7, 1.0)), w, col)
+
+
+def _scratches(img, rnd, x0, x1, y0, y1, n, col, size=14, w=2):
+    for _ in range(n):
+        x, y = rnd.uniform(x0, x1), rnd.uniform(y0, y1)
+        ell(img, (x, y), (size * rnd.uniform(0.6, 1.4), size * 0.2), 0, 190, 350, col, w)
+
+
+def _pebbles(img, rnd, x0, x1, y0, y1, n, fill, out, size=7):
+    for _ in range(n):
+        x, y, r = rnd.uniform(x0, x1), rnd.uniform(y0, y1), size * rnd.uniform(0.6, 1.4)
+        ell(img, (x, y), (r * 1.5, r), 0, 0, 360, fill)
+        ell(img, (x, y), (r * 1.5, r), 0, 0, 360, out, 2)
+
+
+W_HALF_HINT = [0]
+
+
+def _rock(img, cx, base_y, w, h, rnd, fill, shade, out, ow=4, cave=False):
+    """Bada sketchy patthar (kabhi kabhi gufa ke munh ke saath), image-3 jaisa."""
+    n = 10
+    pts = [(cx - w / 2, base_y)]
+    for i in range(1, n):
+        ang = math.pi * (1 - i / n)
+        pts.append((cx + math.cos(ang) * w / 2 * rnd.uniform(0.93, 1.05), base_y - math.sin(ang) * h * rnd.uniform(0.8, 1.08)))
+    pts.append((cx + w / 2, base_y))
+    poly(img, pts, fill, None)
+    sx = cx + w * 0.12
+    right = [p for p in pts if p[0] > sx]
+    poly(img, [(sx, base_y - h * 0.97)] + right + [(sx, base_y)], shade, None)
+    if cave:
+        acx = cx + (-w * 0.06 if cx > W_HALF_HINT[0] else w * 0.06)
+        arch = [(acx + math.cos(math.pi * (1 - k / 12)) * w * 0.2, base_y - math.sin(math.pi * (1 - k / 12)) * h * 0.55) for k in range(13)]
+        poly(img, arch, (40, 38, 46), out, ow)
+    for _ in range(4):
+        x0 = cx + rnd.uniform(-w * 0.4, w * 0.4)
+        y0 = base_y - h * rnd.uniform(0.55, 0.9)
+        pl = [(x0, y0)]
+        for _k in range(3):
+            pl.append((pl[-1][0] + rnd.uniform(-12, 12), pl[-1][1] + rnd.uniform(14, 30)))
+        pline(img, pl, max(2, ow - 1), out)
+    pline(img, pts + [pts[0]], ow, out)
+
+
+def _cloud(img, x, y, s, ow=3, fill=WHITE, out=(70, 62, 60)):
+    parts = [(0, 0, 38), (40, 8, 32), (-40, 10, 30), (14, -18, 30)]
+    for dx, dy, r in parts:
+        circ(img, (x + dx * s, y + dy * s), r * s + ow * 0.6, out)
+    ell(img, (x, y + 22 * s), (78 * s + ow * 0.6, 18 * s + ow * 0.6), 0, 0, 360, out)
+    for dx, dy, r in parts:
+        circ(img, (x + dx * s, y + dy * s), r * s, fill)
+    ell(img, (x, y + 22 * s), (78 * s, 18 * s), 0, 0, 360, fill)
+
+
+def _pine(img, x, y, s, ow):
+    for k, (wd, top) in enumerate([(34, 80), (28, 55), (20, 32)]):
+        poly(img, [(x - wd * s, y - (top - 55) * s - 18 * s * k * 0), (x + wd * s, y - (top - 55) * s), (x, y - (top + 35) * s)],
+             C(70, 130, 95), C(30, 50, 40), max(2, ow - 1))
+    rect(img, x - 5 * s, y, x + 5 * s, y + 18 * s, C(120, 80, 50), C(40, 30, 25), 2)
+
+
 def make_bg(st, kind, seed=0):
     W, H, g = st.W, st.H, st.ground
     rnd = np.random.RandomState(seed % 100000)
-    s = st.s
-    if kind == "orange":
-        img = np.full((H, W, 3), (95, 170, 240), np.uint8)
-        img[g - int(20 * s):] = (150, 150, 150)
-        cv2.line(img, (0, g - int(20 * s)), (W, g - int(20 * s)), (60, 60, 60), 3, cv2.LINE_AA)
-    elif kind == "grass":
-        img = _grad(H, W, (250, 215, 150), (255, 240, 205), 0, g)
-        img[g:] = COL["grass"]
-        for cx, r in [(0.2, 0.28), (0.62, 0.35), (0.95, 0.25)]:
-            cv2.ellipse(img, (int(W * cx), g), (int(W * r), int(H * 0.12)), 0, 180, 360, (90, 170, 70), -1, cv2.LINE_AA)
-        img[g:] = (95, 185, 100)
-        img[g + int((H - g) * 0.5):] = (80, 165, 90)
-    elif kind == "sky":
-        img = _grad(H, W, (245, 190, 110), (255, 235, 200), 0, g)
-        img[g:] = (110, 150, 190)
-        img[g + int((H - g) * 0.5):] = (95, 135, 175)
-    elif kind == "night":
-        img = _grad(H, W, (60, 25, 15), (110, 60, 40), 0, g)
-        img[g:] = (45, 35, 30)
+    u = st.s
+    ow = 3 if st.portrait else 4
+    hz = g - int(H * (0.15 if st.portrait else 0.19))     # door ki zameen (horizon)
+    gt = g - int(H * 0.03)                                  # saamne ki mitti ka kinara
+    OUT = C(45, 40, 40)
+    W_HALF_HINT[0] = W / 2
+    vign = 0.0
+    right_rock = rnd.rand() < 0.5
+    rcx = W * (1.0 if right_rock else 0.0) + (W * 0.03 if right_rock else -W * 0.03)
+    rock_w, rock_h = W * 0.58, H * (0.19 if st.portrait else 0.30)
+
+    if kind == "grass":
+        dry = rnd.rand() < 0.7
+        img = _grad(H, W, C(190, 222, 240), C(228, 241, 247))
+        far, field, tuft, dirt, scr = ((C(214, 190, 128), C(226, 196, 124), C(158, 108, 52), C(190, 142, 98), C(140, 100, 70)) if dry else
+                                       (C(150, 198, 125), C(124, 190, 92), C(66, 135, 58), C(170, 130, 90), C(130, 96, 66)))
+        _band(img, W, H, hz, 14 * u, far, OUT, rnd, ow)
+        _band(img, W, H, hz + H * 0.035, 10 * u, field, OUT, rnd, ow - 1)
+        _tufts(img, rnd, 0, W, hz + H * 0.05, gt - 8, 70, tuft, 20 * u)
+        if rnd.rand() < 0.75:
+            _rock(img, rcx, gt - 4, rock_w, rock_h, rnd, C(168, 168, 170), C(128, 128, 134), OUT, ow, cave=rnd.rand() < 0.5)
+        _band(img, W, H, gt, 5 * u, dirt, C(110, 78, 55), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 55, scr, 16 * u)
+        _pebbles(img, rnd, 0, W, gt + 30, H - 20, 7, C(190, 190, 190), C(80, 70, 65), 7 * u)
     elif kind == "desert":
-        img = _grad(H, W, (170, 215, 250), (200, 235, 255), 0, g)
-        img[g:] = (130, 190, 235)
-        for cx, r in [(0.15, 0.3), (0.7, 0.4)]:
-            cv2.ellipse(img, (int(W * cx), g), (int(W * r), int(H * 0.08)), 0, 180, 360, (140, 200, 240), -1, cv2.LINE_AA)
-        img[g:] = (130, 190, 235)
+        img = _grad(H, W, C(150, 205, 245), C(252, 238, 205))
+        _band(img, W, H, hz, 16 * u, C(240, 208, 152), OUT, rnd, ow)
+        _band(img, W, H, hz + H * 0.05, 20 * u, C(232, 194, 130), OUT, rnd, ow - 1)
+        _tufts(img, rnd, 0, W, hz + H * 0.07, gt - 8, 14, C(120, 100, 60), 16 * u)
+        if rnd.rand() < 0.6:
+            _rock(img, rcx, gt - 4, rock_w, rock_h, rnd, C(206, 160, 118), C(172, 128, 92), OUT, ow)
+        _band(img, W, H, gt, 5 * u, C(222, 182, 120), C(150, 110, 70), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 60, C(176, 136, 88), 18 * u)
+        _pebbles(img, rnd, 0, W, gt + 30, H - 20, 8, C(200, 170, 130), C(110, 85, 60), 6 * u)
+    elif kind == "sky":
+        img = _grad(H, W, C(100, 175, 240), C(218, 240, 252))
+        _band(img, W, H, hz, 24 * u, C(140, 200, 160), OUT, rnd, ow)
+        _band(img, W, H, hz + H * 0.05, 18 * u, C(112, 188, 112), OUT, rnd, ow - 1)
+        _band(img, W, H, gt, 5 * u, C(98, 176, 94), C(40, 90, 50), rnd, ow - 1)
+        _tufts(img, rnd, 0, W, gt + 14, H - 8, 70, C(56, 120, 58), 18 * u)
+        for _ in range(14):
+            x, y = rnd.uniform(0, W), rnd.uniform(gt + 20, H - 10)
+            circ(img, (x, y), 4.5 * u, rnd.choice([0, 1]) and C(255, 255, 255) or C(255, 220, 70))
+    elif kind == "orange":
+        img = _grad(H, W, C(255, 140, 70), C(255, 224, 150))
+        sx = W * rnd.uniform(0.3, 0.7)
+        circ(img, (sx, hz - H * 0.015), min(W, H) * 0.16, C(255, 240, 170))
+        circ(img, (sx, hz - H * 0.015), min(W, H) * 0.16, OUT, ow)
+        _band(img, W, H, hz, 18 * u, C(196, 98, 62), OUT, rnd, ow)
+        _band(img, W, H, hz + H * 0.05, 14 * u, C(158, 76, 52), OUT, rnd, ow - 1)
+        _band(img, W, H, gt, 5 * u, C(124, 72, 56), C(60, 32, 28), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 55, C(92, 52, 44), 16 * u)
+        _tufts(img, rnd, 0, W, gt + 20, H - 10, 20, C(80, 46, 40), 16 * u)
+    elif kind == "night":
+        img = _grad(H, W, C(10, 14, 42), C(58, 64, 118))
+        mx, my = W * rnd.uniform(0.6, 0.85), H * 0.12
+        circ(img, (mx, my), min(W, H) * 0.075, C(246, 244, 216))
+        circ(img, (mx, my), min(W, H) * 0.075, OUT, ow - 1)
+        for dx, dy, r in [(-0.2, -0.15, 0.1), (0.25, 0.12, 0.08)]:
+            circ(img, (mx + dx * min(W, H) * 0.075 * 2, my + dy * min(W, H) * 0.075 * 2), r * min(W, H) * 0.075 * 1.4, C(215, 212, 188))
+        _band(img, W, H, hz, 22 * u, C(40, 46, 92), C(88, 98, 160), rnd, ow - 1)
+        _band(img, W, H, hz + H * 0.05, 16 * u, C(30, 34, 70), C(78, 88, 150), rnd, ow - 1)
+        _band(img, W, H, gt, 5 * u, C(34, 36, 62), C(86, 94, 150), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 50, C(70, 76, 120), 16 * u)
+        _tufts(img, rnd, 0, W, gt + 14, H - 10, 26, C(78, 90, 140), 16 * u)
+        vign = 0.30
     elif kind == "cave":
-        img = np.full((H, W, 3), (45, 55, 75), np.uint8)
-        for x in range(0, W, int(70 * s)):
-            hh = int(rnd.randint(40, 150) * s)
-            cv2.fillPoly(img, [np.array([[x, 0], [x + int(60 * s), 0], [x + int(30 * s), hh]])], (30, 38, 55), cv2.LINE_AA)
-        img[g:] = (85, 100, 120)
-    elif kind == "ocean":
-        img = _grad(H, W, (250, 215, 150), (255, 240, 205), 0, int(g * 0.8))
-        img[int(g * 0.8):g] = (190, 140, 50)
-        for i in range(8):
-            y = int(g * 0.8) + (g - int(g * 0.8)) * i // 8
-            cv2.line(img, (0, y), (W, y), (205, 160, 70), 2, cv2.LINE_AA)
-        img[g:] = (150, 205, 235)
-    elif kind == "snow":
-        img = _grad(H, W, (225, 215, 200), (250, 245, 240), 0, g)
-        img[g:] = (250, 248, 245)
-        cv2.ellipse(img, (int(W * 0.3), g), (int(W * 0.35), int(H * 0.09)), 0, 180, 360, (245, 235, 225), -1, cv2.LINE_AA)
-        img[g + int((H - g) * 0.45):] = (235, 225, 215)
-    elif kind == "city":
-        img = _grad(H, W, (235, 215, 190), (250, 240, 230), 0, g)
-        x = 0
+        img = _grad(H, W, C(66, 58, 60), C(112, 98, 94))
+        for _ in range(70):
+            x, y = rnd.uniform(0, W), rnd.uniform(0, gt)
+            pl = [(x, y)]
+            for _k in range(3):
+                pl.append((pl[-1][0] + rnd.uniform(-16, 16), pl[-1][1] + rnd.uniform(6, 22)))
+            pline(img, pl, 2, C(52, 44, 46))
+        for _ in range(45):
+            x, y = rnd.uniform(0, W), rnd.uniform(H * 0.1, gt)
+            ell(img, (x, y), (rnd.uniform(14, 36) * u, 5 * u), 0, 190, 350, C(140, 126, 120), 2)
+        x = -20
         while x < W:
-            bw, bh = int(rnd.randint(70, 150) * s), int(rnd.randint(110, 300) * s)
-            c = int(rnd.randint(150, 195))
-            cv2.rectangle(img, (x, g - bh), (x + bw, g), (c, c - 10, c - 20), -1)
-            for wy in range(g - bh + 14, g - 20, int(30 * s)):
-                for wx in range(x + 10, x + bw - 14, int(26 * s)):
-                    cv2.rectangle(img, (wx, wy), (wx + int(12 * s), wy + int(16 * s)), (200, 235, 250), -1)
-            x += bw + int(rnd.randint(0, 20))
-        img[g:] = (120, 120, 125)
-        cv2.line(img, (0, g + int((H - g) * 0.5)), (W, g + int((H - g) * 0.5)), (200, 200, 200), 4)
-    else:  # white paper
-        img = np.full((H, W, 3), (246, 248, 248), np.uint8)
-        img[g:] = (240, 242, 242)
-        cv2.line(img, (0, g), (W, g), (205, 205, 205), 2, cv2.LINE_AA)
-    return img
+            bw, bl = int(rnd.randint(50, 100) * u), int(rnd.randint(50, 190) * u)
+            poly(img, [(x, 0), (x + bw, 0), (x + bw * rnd.uniform(0.35, 0.65), bl)], C(88, 78, 80), C(34, 30, 32), ow)
+            x += bw - int(rnd.randint(0, 12))
+        _band(img, W, H, gt, 7 * u, C(128, 108, 90), C(40, 32, 30), rnd, ow)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 45, C(90, 74, 64), 16 * u)
+        _pebbles(img, rnd, 0, W, gt + 24, H - 18, 14, C(150, 140, 135), C(50, 44, 42), 8 * u)
+        vign = 0.38
+    elif kind == "ocean":
+        img = _grad(H, W, C(150, 206, 246), C(236, 247, 252))
+        poly(img, [(0, hz), (W, hz), (W, gt), (0, gt)], C(70, 150, 212), None)
+        pline(img, [(0, hz), (W, hz)], ow, OUT)
+        img[int((hz + gt) / 2):gt] = (img[int((hz + gt) / 2):gt] * 0.88).astype(np.uint8)
+        _scratches(img, rnd, 0, W, hz + 8, gt - 8, 55, C(225, 242, 252), 22 * u, 3)
+        if rnd.rand() < 0.5:
+            _rock(img, rcx, gt - 4, rock_w * 0.8, rock_h, rnd, C(150, 150, 156), C(112, 112, 122), OUT, ow)
+        _band(img, W, H, gt, 6 * u, C(238, 214, 160), C(140, 110, 70), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 50, C(190, 160, 110), 16 * u)
+        _pebbles(img, rnd, 0, W, gt + 30, H - 20, 8, C(235, 225, 210), C(110, 90, 70), 6 * u)
+    elif kind == "snow":
+        img = _grad(H, W, C(186, 204, 228), C(236, 243, 250))
+        for k in range(3):
+            px = W * (0.15 + 0.35 * k) + rnd.uniform(-30, 30)
+            ph = H * rnd.uniform(0.14, 0.2)
+            poly(img, [(px - W * 0.28, hz + 6), (px, hz - ph), (px + W * 0.28, hz + 6)], C(184, 202, 230), OUT, ow - 1)
+            poly(img, [(px - W * 0.06, hz - ph * 0.72), (px, hz - ph), (px + W * 0.06, hz - ph * 0.72), (px + W * 0.02, hz - ph * 0.62),
+                       (px - W * 0.015, hz - ph * 0.7)], C(250, 252, 255), None)
+        _band(img, W, H, hz + H * 0.01, 12 * u, C(244, 249, 255), C(120, 142, 180), rnd, ow - 1)
+        for _ in range(4):
+            _pine(img, rnd.uniform(0.05, 0.95) * W, hz + H * 0.05 + rnd.uniform(0, H * 0.03), 0.8 * u, ow)
+        _band(img, W, H, gt, 5 * u, C(236, 243, 252), C(120, 142, 180), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, gt + 18, H - 8, 55, C(170, 190, 222), 18 * u)
+        _pebbles(img, rnd, 0, W, gt + 30, H - 20, 5, C(225, 232, 244), C(110, 130, 170), 6 * u)
+    elif kind == "city":
+        img = _grad(H, W, C(176, 214, 246), C(240, 246, 251))
+        x = -10
+        while x < W:
+            bw, bh = int(rnd.randint(70, 150) * u), int(rnd.randint(120, 320) * u)
+            c = int(rnd.randint(150, 210))
+            poly(img, [(x, gt - 6), (x, gt - 6 - bh), (x + bw, gt - 6 - bh), (x + bw, gt - 6)], C(c, c - 10, c - 24), OUT, ow - 1)
+            for wy in range(int(gt - bh + 18 * u), int(gt - 28 * u), int(32 * u)):
+                for wx in range(int(x + 12 * u), int(x + bw - 18 * u), int(28 * u)):
+                    lit = rnd.rand() < 0.6
+                    rect(img, wx, wy, wx + 13 * u, wy + 17 * u, C(255, 238, 170) if lit else C(120, 150, 180), OUT, 2)
+            x += bw + int(rnd.randint(0, 16))
+        _band(img, W, H, gt - 4, 2, C(172, 166, 160), OUT, rnd, ow - 1)
+        _band(img, W, H, gt + H * 0.025, 2, C(104, 106, 116), OUT, rnd, ow - 1)
+        yy = g + (H - g) * 0.5
+        for dx in range(0, W, int(90 * u)):
+            line(img, (dx + 10, yy), (dx + 60 * u, yy), 5, C(238, 224, 128))
+        _scratches(img, rnd, 0, W, gt + 22, H - 8, 30, C(78, 80, 90), 18 * u)
+    else:  # white (kaagaz)
+        img = np.full((H, W, 3), C(249, 248, 244), np.uint8)
+        img[g:] = C(238, 236, 229)
+        _band(img, W, H, g, 3 * u, C(238, 236, 229), C(120, 120, 118), rnd, ow - 1)
+        _scratches(img, rnd, 0, W, g + 20, H - 10, 26, C(200, 198, 190), 16 * u)
+        _tufts(img, rnd, 0, W, g + 10, g + 60, 10, C(176, 176, 170), 14 * u)
+    # kaagaz/rang ka halka grain + kinare thode gehre
+    grain = rnd.normal(0, 2.4, (H, W, 1))
+    out_img = np.clip(img.astype(np.float32) + grain, 0, 255)
+    if vign > 0:
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        r2 = ((xx - W / 2) / (W / 2)) ** 2 + ((yy - H * 0.5) / (H / 2)) ** 2
+        out_img *= (1 - vign * np.clip(r2 / 2, 0, 1))[:, :, None]
+    return out_img.astype(np.uint8)
 
 
 def ambient(st, img, kind, t, seed):
     W, H, s = st.W, st.H, st.s
-    if kind in ("grass", "sky", "desert", "ocean"):
+    if kind in ("grass", "sky", "desert", "ocean", "snow", "city"):
         for i in range(3):
             x = (W * (0.15 + 0.38 * i) + t * (18 + 9 * i) + seed * 13) % (W + 300) - 150
-            y = H * (0.12 + 0.07 * ((i + seed) % 3))
-            for dx, dy, r in [(0, 0, 38), (40, 8, 32), (-40, 10, 30), (14, -18, 30)]:
-                circ(img, (x + dx * s, y + dy * s), r * s, WHITE)
-            ell(img, (x, y + 22 * s), (78 * s, 18 * s), 0, 0, 360, WHITE)
+            y = H * (0.07 + 0.055 * ((i + seed) % 3))
+            _cloud(img, x, y, s * (1.0 + 0.15 * ((i + seed) % 2)), 3 if st.portrait else 4)
     elif kind == "night":
         rnd = np.random.RandomState(seed % 1000)
-        for i in range(45):
-            x, y = rnd.rand() * W, rnd.rand() * st.ground * 0.9
-            b = 140 + 115 * abs(math.sin(t * 2 + i))
+        for i in range(55):
+            x, y = rnd.rand() * W, rnd.rand() * st.ground * 0.7
+            b = 150 + 105 * abs(math.sin(t * 2 + i))
             circ(img, (x, y), (1.2 + (i % 3) * 0.7) * s, (b, b, b + 20))
-    elif kind == "snow":
+    if kind == "snow":
         rnd = np.random.RandomState(seed % 1000)
         for i in range(60):
             x = (rnd.rand() * W + 25 * math.sin(t * 1.3 + i)) % W
             y = (rnd.rand() * H + t * (60 + (i % 4) * 25)) % H
             circ(img, (x, y), (2 + (i % 3)) * s, (255, 255, 255))
-        pass
 
 
 # ------------------------------------------------------------------ props
@@ -707,23 +902,97 @@ def _limb(o, a1, bend, l1, l2, f):
     return p1, p2
 
 
+HAIR_COLS = [C(108, 68, 42), C(70, 46, 32), C(158, 84, 42), C(92, 80, 72)]
+FUR = C(142, 98, 60)
+FUR_DARK = C(86, 56, 34)
+FUR_LIGHT = C(180, 132, 86)
+
+
+def _hair_col(ch):
+    return HAIR_COLS[zlib.crc32(str(ch.get("name", "x")).encode()) % len(HAIR_COLS)]
+
+
+def _draw_hair(img, hc, hr, f, th, kind, col, seed, t, ph):
+    """Bikhre hue, haath se bane baal (image-3 jaisa). kind: short / long."""
+    rnd = np.random.RandomState(seed % 100000)
+    n = 24 if kind == "short" else 28
+    strands = []
+    for k in range(n):
+        a = math.radians(rnd.uniform(6, 174))
+        r0 = hr * rnd.uniform(0.78, 1.0)
+        base = (hc[0] + math.cos(a) * r0, hc[1] - math.sin(a) * r0)
+        L = hr * rnd.uniform(0.3, 0.72)
+        da = a + math.radians(rnd.uniform(-38, 38))
+        sw = math.sin(t * 2.2 + k * 1.3 + ph) * 0.05 * hr
+        mid = (base[0] + math.cos(da) * L * 0.55, base[1] - math.sin(da) * L * 0.55)
+        tip = (base[0] + math.cos(da) * L + sw, base[1] - math.sin(da) * L)
+        strands.append([base, mid, tip])
+    for s_ in strands:
+        pline(img, s_, max(4, th * 1.25), col)
+    for s_ in strands:
+        pline(img, s_, max(2, th * 0.42), BLACK)
+    # topi jaisa baalon ka hissa
+    outer = [(hc[0] + hr * 1.0 * math.cos(math.radians(a)), hc[1] - hr * 1.0 * math.sin(math.radians(a))) for a in range(8, 173, 11)]
+    fr = np.random.RandomState((seed + 5) % 100000)
+    inner = [(hc[0] + f * 0.12 * hr + hr * 0.95 * math.cos(math.radians(a)),
+              hc[1] - hr * (0.28 + 0.4 * math.sin(math.radians(a)) + fr.uniform(-0.1, 0.1))) for a in range(172, 7, -11)]
+    poly(img, outer + inner, col, None)
+    pline(img, inner, max(2, th * 0.5), BLACK)
+    for _ in range(7):  # bal ke andar lakeerein
+        a = math.radians(fr.uniform(25, 155))
+        p0 = (hc[0] + math.cos(a) * hr * 0.9, hc[1] - math.sin(a) * hr * 0.92)
+        p1 = (hc[0] + math.cos(a) * hr * 0.5, hc[1] - math.sin(a) * hr * 0.55 - hr * 0.1)
+        line(img, p0, p1, max(2, th * 0.4), BLACK)
+
+
+def _fur_pelt(img, sho, hip, f, h, th, seed):
+    """Jaanwar ki khaal (fur) - kandhe se kamar tak, kinare jagged (image-3 jaisa)."""
+    rnd = np.random.RandomState(seed % 100000)
+    wd, hw = 0.085 * h, 0.15 * h
+    hem = hip[1] + 0.10 * h
+    cx = hip[0] + f * 0.02 * h
+    top = [(sho[0] - wd, sho[1] + 0.005 * h), (sho[0] + wd * 0.55, sho[1] - 0.006 * h)]
+    right = (cx + hw, hem)
+    left = (cx - hw, hem)
+    zig = []
+    n = 9
+    for i in range(n + 1):
+        tt = i / n
+        zig.append((right[0] + (left[0] - right[0]) * tt, hem + (0.045 * h if i % 2 else 0.0) + rnd.uniform(-0.01, 0.012) * h))
+    # tail (peeche ki taraf)
+    tx = cx - f * hw * 0.9
+    tail = [(tx, hem - 0.03 * h), (tx - f * 0.05 * h, hem + 0.09 * h), (tx - f * 0.02 * h, hem + 0.13 * h), (tx + f * 0.03 * h, hem + 0.05 * h)]
+    poly(img, tail, FUR, BLACK, 2)
+    pts = top + zig
+    poly(img, _wob(pts, seed, 1.2), FUR, None)
+    shade = [(sho[0] + wd * 0.1, sho[1]), (sho[0] + wd * 0.55, sho[1])] + zig[:n // 2 + 1] + [(cx + hw * 0.1, hem)]
+    poly(img, shade, FUR_DARK, None)
+    for _ in range(18):  # fur ki lakeerein
+        x = rnd.uniform(min(left[0], top[0][0]), max(right[0], top[1][0]))
+        y = rnd.uniform(sho[1] + 0.03 * h, hem)
+        line(img, (x, y), (x + rnd.uniform(-4, 4), y + rnd.uniform(8, 16)), 2, FUR_DARK if rnd.rand() < 0.6 else FUR_LIGHT)
+    poly(img, _wob(pts, seed, 1.2), None, BLACK, max(2, th * 0.55))
+
+
 def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
     """ch: dict(gender, hair, garment, accessory, color). f = +1 (right) ya -1 (left) dekhta hai."""
     h = st.char_h * scale
     g = ground if ground is not None else st.ground
     P = pose(action, t, ph)
-    th = max(4.0, 0.024 * h)
+    th = max(4.0, 0.021 * h)
     thigh = shin = 0.235 * h
     hip = (x + P["dx"] * h * f, g - (thigh + shin) * 0.985 + P["dy"] * h)
     tl = 0.30 * h
     lean = math.radians(P["lean"])
     sho = (hip[0] + math.sin(lean) * tl * f, hip[1] - math.cos(lean) * tl)
-    hr = 0.118 * h
+    hr = 0.13 * h
     tilt = math.radians(P["lean"] + P["tilt"])
     hc = (sho[0] + math.sin(tilt) * (hr + 0.03 * h) * f, sho[1] - math.cos(tilt) * (hr + 0.03 * h))
     col = COL.get(ch.get("color", "blue"), COL["blue"])
     garment, acc = ch.get("garment", "none"), ch.get("accessory", "none")
     female = ch.get("gender") == "female"
+    seed = zlib.crc32(str(ch.get("name", "x")).encode()) % 100000
+    hcol = _hair_col(ch)
 
     # shadow
     sc = tuple(int(c * 0.82) for c in img[min(img.shape[0] - 1, int(g + 4)), int(min(max(x, 0), img.shape[1] - 1))])
@@ -732,7 +1001,7 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
     # cape (back)
     if garment == "cape":
         sw = math.sin(t * 3 + ph) * 0.05 * h
-        poly(img, [(sho[0], sho[1]), (sho[0] - f * 0.32 * h + sw, hip[1] + 0.2 * h), (sho[0] - f * 0.08 * h, hip[1] + 0.26 * h)], col, BLACK, 2)
+        poly(img, _wob([(sho[0], sho[1]), (sho[0] - f * 0.32 * h + sw, hip[1] + 0.2 * h), (sho[0] - f * 0.08 * h, hip[1] + 0.26 * h)], seed, 1.5), col, BLACK, 3)
 
     aBp1, aBp2 = _limb(sho, P["aB"], P["eB"], 0.16 * h, 0.15 * h, f)
     aFp1, aFp2 = _limb(sho, P["aF"], P["eF"], 0.16 * h, 0.15 * h, f)
@@ -744,44 +1013,53 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
         line(img, p1, p2, th)
         circ(img, p1, th * 0.5, BLACK)
         if hand:
-            circ(img, p2, th * 1.15, WHITE)
-            circ(img, p2, th * 1.15, BLACK, 2)
+            circ(img, p2, th * 0.68, BLACK)
         if foot:
-            line(img, p2, (p2[0] + f * 0.075 * h, p2[1]), th)
+            line(img, p2, (p2[0] + f * 0.08 * h, p2[1]), th)
+            circ(img, (p2[0] + f * 0.08 * h, p2[1]), th * 0.5, BLACK)
 
     limb_draw(sho, aBp1, aBp2, hand=True)
     limb_draw(hip, lBp1, lBp2, foot=True)
     line(img, hip, sho, th)
     line(img, sho, (hc[0] - math.sin(tilt) * hr * 0.9 * f, hc[1] + math.cos(tilt) * hr * 0.9), th)
     # garments
-    if garment in ("tunic", "robe", "dress"):
+    if garment == "loincloth":
+        _fur_pelt(img, sho, hip, f, h, th, seed)
+    elif garment in ("tunic", "robe", "dress"):
         hem = hip[1] + (0.07 * h if garment == "tunic" else 0.40 * h)
         wd = 0.085 * h if garment != "dress" else 0.07 * h
         hw = (0.14 if garment == "tunic" else 0.20 if garment == "robe" else 0.25) * h
-        poly(img, [(sho[0] - wd, sho[1]), (sho[0] + wd, sho[1]), (hip[0] + f * 0.02 * h + hw, hem), (hip[0] + f * 0.02 * h - hw, hem)], col, BLACK, 2)
-    elif garment == "loincloth":
-        poly(img, [(hip[0] - 0.07 * h, hip[1] - 0.02 * h), (hip[0] + 0.07 * h, hip[1] - 0.02 * h), (hip[0] + 0.04 * h, hip[1] + 0.12 * h),
-                   (hip[0] - 0.04 * h, hip[1] + 0.12 * h)], col, BLACK, 2)
+        cx = hip[0] + f * 0.02 * h
+        pts = [(sho[0] - wd, sho[1]), (sho[0] + wd, sho[1]), (cx + hw, hem), (cx - hw, hem)]
+        wp = _wob(pts, seed, 1.4)
+        poly(img, wp, col, None)
+        shade = tuple(int(c_ * 0.78) for c_ in col)
+        poly(img, [(sho[0] + wd * 0.15, sho[1]), (sho[0] + wd, sho[1]), (cx + hw, hem), (cx + hw * 0.15, hem)], shade, None)
+        hs = tuple(int(c_ * 0.62) for c_ in col)
+        line(img, (cx - hw * 0.96, hem - 0.025 * h), (cx + hw * 0.96, hem - 0.025 * h), max(2, th * 0.5), hs)
+        if garment in ("tunic", "robe"):
+            by = hip[1] - 0.03 * h
+            line(img, (hip[0] - 0.09 * h, by), (hip[0] + 0.09 * h, by), max(3, th * 0.8), COL["wood"])
+        poly(img, wp, None, BLACK, max(2, th * 0.55))
     limb_draw(hip, lFp1, lFp2, foot=True)
     # hair back (female long)
     sway = math.sin(t * 2 + ph) * 0.18 * hr
     if female:
-        poly(img, [(hc[0] - 1.12 * hr, hc[1] - 0.2 * hr), (hc[0] - 1.18 * hr - f * 0.3 * hr + sway, hc[1] + 2.5 * hr),
-                   (hc[0] + 1.18 * hr - f * 0.3 * hr + sway, hc[1] + 2.5 * hr), (hc[0] + 1.12 * hr, hc[1] - 0.2 * hr)], BLACK)
-        circ(img, hc, hr * 1.12, BLACK)
+        rn = np.random.RandomState(seed + 3)
+        lft, rgt = hc[0] - 1.15 * hr, hc[0] + 1.15 * hr
+        bot_y = hc[1] + 2.5 * hr
+        zz = [(rgt - f * 0.3 * hr + sway - (rgt - lft) * i / 6.0, bot_y + (0.3 * hr if i % 2 else 0) + rn.uniform(-0.12, 0.12) * hr) for i in range(7)]
+        back = [(hc[0] - 1.12 * hr, hc[1] - 0.2 * hr)] + zz[::-1] + [(hc[0] + 1.12 * hr, hc[1] - 0.2 * hr)]
+        poly(img, _wob(back, seed + 1, 1.5), hcol, BLACK, max(2, th * 0.55))
+        poly(img, _blob(hc, hr * 1.1, seed + 2), hcol, BLACK, max(2, th * 0.55))
     # head
-    circ(img, hc, hr, WHITE)
+    head = _blob(hc, hr, seed + 9)
+    poly(img, head, WHITE, None)
     # hair front
-    if female:
-        pts = [(hc[0] + hr * 1.06 * math.cos(math.radians(a)), hc[1] - hr * 1.06 * math.sin(math.radians(a))) for a in range(180, -1, -12)]
-        inner = [(hc[0] + f * hr * 0.2 + hr * 0.62 * math.cos(math.radians(a)), hc[1] - hr * 0.1 - hr * 0.7 * math.sin(math.radians(a))) for a in range(0, 181, 12)]
-        poly(img, pts + inner, BLACK)
-    elif ch.get("hair", "short") != "bald":
-        outer = [(hc[0] + hr * 1.04 * math.cos(math.radians(a)), hc[1] - hr * 1.04 * math.sin(math.radians(a))) for a in range(12, 169, 12)]
-        inner = [(hc[0] + hr * 0.97 * math.cos(math.radians(a)), hc[1] - hr * (0.05 + 0.5 * math.sin(math.radians(a)))) for a in range(168, 11, -12)]
-        poly(img, outer + inner, BLACK)
-        poly(img, [(hc[0] - 0.35 * hr, hc[1] - 0.98 * hr), (hc[0] - f * 0.05 * hr, hc[1] - 1.32 * hr), (hc[0] + 0.3 * hr, hc[1] - 1.0 * hr)], BLACK)
-    circ(img, hc, hr, BLACK, max(3, th * 0.75))
+    kind = "long" if female else ("none" if ch.get("hair", "short") == "bald" else "short")
+    if kind != "none":
+        _draw_hair(img, hc, hr, f, th, kind, hcol, seed, t, ph)
+    poly(img, head, None, BLACK, max(3, th * 0.7))
     # face
     fx = hc[0] + f * 0.16 * hr
     blink = (t + ph) % 3.4 < 0.12
@@ -800,8 +1078,6 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
         if female and not big_eye:
             line(img, (ex + sgn * 0.1 * hr, ey - 0.02 * hr), (ex + sgn * 0.22 * hr, ey - 0.12 * hr), max(2, th * 0.3))
         by = ey - (0.46 if emo in ("surprised", "scared", "excited") else 0.3) * hr
-        tilt_b = {"angry": (0.14, -0.1), "sad": (-0.12, 0.1), "scared": (-0.12, 0.08), "curious": (0.0, 0.0)}.get(emo, (0.0, 0.0))
-        inner_dy, outer_dy = (tilt_b[0] * hr * 1.0, tilt_b[1] * hr * 1.0) if emo != "curious" else (0, 0)
         if emo == "curious" and sgn == 1:
             by -= 0.14 * hr
         if emo == "angry":
@@ -830,7 +1106,6 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
     if acc == "beard":
         poly(img, [(hc[0] + hr * 0.95 * math.cos(math.radians(a)), hc[1] + hr * 0.95 * math.sin(math.radians(a))) for a in range(15, 166, 10)] +
              [(hc[0] + f * 0.05 * hr, hc[1] + 1.55 * hr)], (115, 115, 125), BLACK, 2)
-        # redraw mouth on top
         line(img, (fx - 0.15 * hr, my), (fx + 0.15 * hr, my), wth)
     elif acc == "glasses":
         for sgn in (-1, 1):
