@@ -2,13 +2,12 @@ name: Daily Explainer Short
 
 on:
   schedule:
-    # Din mein 2 baar start hota hai; asal posting time neeche random delay se random hota hai.
-    - cron: "0 4 * * *"   # window 1: 09:00 PKT se shuru
-    - cron: "0 13 * * *"  # window 2: 18:00 PKT se shuru
-  workflow_dispatch:       # manual run: delay nahi hota, foran chalta hai
+    - cron: "0 4 * * *"
+    - cron: "0 13 * * *"
+  workflow_dispatch:
     inputs:
       mode:
-        description: "Kya banana hai? short = sirf ek Short (sabse tez) | long = sirf long video | both = long video + usko promote karne wala Short (cron yehi karta hai)"
+        description: "Kya banana hai? short = sirf ek Short | long = sirf long video | both = long + promo Short"
         type: choice
         default: short
         options:
@@ -16,20 +15,16 @@ on:
           - long
           - both
       upload:
-        description: "YouTube par upload karna hai? Band karo to sirf test hoga (video Artifacts mein milegi, topic history save nahi hogi)"
+        description: "YouTube par upload karna hai? Band karo to sirf test hoga"
         type: boolean
         default: true
 
 permissions:
-  contents: write          # history.json (purane topics) wapas commit karne ke liye
+  contents: write
 
 env:
-  # Har run is se zyada se zyada itne minute baad post karega (random minutes + seconds).
-  # Private repo ho to free minutes bachane ke liye ise kam kar dein (e.g. 90).
   MAX_DELAY_MIN: "240"
-  # Long video ki script lambai (words): 1500 = ~9 min, 1700 = ~10 min.
   LONG_TARGET_WORDS: "1500"
-  # cron par hamesha both; manual run par jo option chuna wo.
   MODE: ${{ inputs.mode || 'both' }}
   DO_UPLOAD: ${{ (github.event_name == 'workflow_dispatch' && inputs.upload == false) && 'false' || 'true' }}
 
@@ -72,10 +67,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python script_gen.py
 
-      - name: Render video (code-drawn stick-man animation + Kokoro voice + music)
+      - name: Render video
         timeout-minutes: 12
         env:
-          # Koi image API nahi. Music code se banta hai (MUSIC_MODE=download karne par Kevin MacLeod CC-BY track utarta hai)
           MUSIC_MODE: synth
         run: |
           fc-cache -f
