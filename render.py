@@ -1,7 +1,8 @@
 """script_*.json -> video. Short: 1080x1920 (9:16). Long: 1920x1080 (16:9).
 
 Poora visual code se banta hai (anim.py): koi image API / internet nahi chahiye, is liye video hamesha ban jati hai.
-Awaaz: Kokoro (voice.py). Music + sound effects: music.py (code se, copyright-free).
+Awaaz: Kokoro (voice.py) - HAMESHA male narrator boy (ek hi awaaz poori video mein).
+Music + sound effects: music.py (code se, copyright-free).
 MODE (env): both | long | short.  Output: output_short.mp4, output_long.mp4, thumbnail.jpg (long ke liye)
 """
 import json
@@ -129,7 +130,7 @@ def make_thumbnail(frame_bgr, text, out="thumbnail.jpg"):
 
 # ------------------------------------------------------------------ audio helpers
 def mouth_envelope(x, n_frames):
-    """Awaaz ki zor se har frame ka munh khulne ka andaza (0..1) - lip sync."""
+    """Awaaz ki zor se har frame ka munh khulne ka andaza (0..1) - lip sync (sirf narrator)."""
     hop = music.SR / FPS
     env = np.zeros(n_frames, np.float32)
     for f in range(n_frames):
@@ -169,12 +170,11 @@ def create_video(kind, data, output_path):
     teaser = bool(data.get("teaser"))
     t_start = time.time()
 
-    # 1) awaaz (har scene ki alag)
+    # 1) awaaz (har scene ki alag). NARRATOR hamesha male - chahe scene mein female/animal ho.
     audio, speech_dur, wavs = [], [], []
     for i, sc in enumerate(scenes):
         print(f"[{kind}] voice {i + 1}/{len(scenes)}: {sc['narration']}", flush=True)
         wp = os.path.join(tmp, f"a{i}.wav")
-        # Poori video mein NARRATOR ek hi hai (male boy). Character (larki ho ya larka) apni awaaz mein nahi bolta.
         voice.synth(sc["narration"], wp, speed, "male")
         x = music.read_wav(wp)
         wavs.append(x)
