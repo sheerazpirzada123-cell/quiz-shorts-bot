@@ -1,7 +1,7 @@
 """script_*.json -> video. Short: 1080x1920 (9:16). Long: 1920x1080 (16:9).
 
-Poora visual code se banta hai (anim.py): koi image API / internet nahi chahiye, is liye video hamesha ban jati hai.
-Awaaz: Kokoro (voice.py) - HAMESHA male narrator boy (ek hi awaaz poori video mein).
+Poora visual code se banta hai (anim.py): koi image API / internet nahi chahiye.
+Awaaz: Kokoro (voice.py) - HAMESHA male narrator boy.
 Music + sound effects: music.py (code se, copyright-free).
 MODE (env): both | long | short.  Output: output_short.mp4, output_long.mp4, thumbnail.jpg (long ke liye)
 """
@@ -23,7 +23,7 @@ import anim
 import music
 import voice
 
-cv2.setNumThreads(1)  # torch (Kokoro) ke saath OpenMP/thread ulajhne se bachne ke liye
+cv2.setNumThreads(1)
 FPS = 30
 FONT = "DejaVu Sans"
 PROFILES = {
@@ -41,7 +41,6 @@ def duration(path):
     return float(out.strip())
 
 
-# ------------------------------------------------------------------ captions
 def ass_time(t):
     cs = int(round(t * 100))
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
@@ -60,7 +59,6 @@ def chunk_words(words, max_words=3, max_chars=17):
 
 
 def build_ass(p, scene_info, path):
-    """Har lafz par highlight hone wale captions (active word yellow)."""
     c = p["cap"]
     head = (
         f"[Script Info]\nScriptType: v4.00+\nPlayResX: {p['OW']}\nPlayResY: {p['OH']}\nWrapStyle: 0\n\n"
@@ -128,9 +126,7 @@ def make_thumbnail(frame_bgr, text, out="thumbnail.jpg"):
     img.save(out, quality=90)
 
 
-# ------------------------------------------------------------------ audio helpers
 def mouth_envelope(x, n_frames):
-    """Awaaz ki zor se har frame ka munh khulne ka andaza (0..1) - lip sync (sirf narrator)."""
     hop = music.SR / FPS
     env = np.zeros(n_frames, np.float32)
     for f in range(n_frames):
@@ -147,7 +143,6 @@ EMO_SPEED = dict(excited=1.06, angry=1.03, surprised=0.97, scared=0.93, sad=0.88
 
 
 def scene_speed(base, sc, i, n, kind, teaser):
-    """Emotion ke hisab se awaaz ki raftaar (sad = dheema, excited = tez); short ka aakhri punchline thoda slow."""
     sp = base * EMO_SPEED.get(sc.get("emotion", "neutral"), 1.0)
     if i == n - 1 and kind == "short" and not teaser:
         sp *= 0.95
@@ -155,7 +150,6 @@ def scene_speed(base, sc, i, n, kind, teaser):
 
 
 def scene_pre(sc):
-    """Reveal/shock se pehle chhota sa saans (suspense)."""
     nar = sc.get("narration", "")
     if sc.get("action") == "shock" or sc.get("emotion") == "surprised":
         return 0.18
@@ -168,7 +162,7 @@ def sfx_for_scene(sc, t0):
     ev = []
     if t0 > 0:
         ev.append((t0, "whoosh", 0.7))
-    for n, name in enumerate(sc.get("props", [])[:3]):
+    for n, name in enumerate(sc.get("props", [])[:2]):
         ev.append((t0 + 0.2 + 0.2 * n, "pop", 0.8))
     if (sc.get("label") or "").strip():
         ev.append((t0 + 0.35, "ding", 0.7))
@@ -185,12 +179,11 @@ def sfx_for_scene(sc, t0):
         ev.append((t0 + 0.05, "thud", 0.6))
     elif emo == "excited" and sc.get("action") != "celebrate":
         ev.append((t0 + 0.1, "ding", 0.45))
-    if t0 == 0:  # hook par impact
+    if t0 == 0:
         ev.append((0.04, "thud", 0.55))
     return ev
 
 
-# ------------------------------------------------------------------ main builder
 def create_video(kind, data, output_path):
     p = PROFILES[kind]
     st = anim.Stage(p["W"], p["H"], p["portrait"])
@@ -203,7 +196,6 @@ def create_video(kind, data, output_path):
     teaser = bool(data.get("teaser"))
     t_start = time.time()
 
-    # 1) awaaz (har scene ki alag). NARRATOR hamesha male - chahe scene mein female/animal ho.
     audio, speech_dur, wavs = [], [], []
     for i, sc in enumerate(scenes):
         print(f"[{kind}] voice {i + 1}/{len(scenes)}: {sc['narration']}", flush=True)
@@ -213,7 +205,6 @@ def create_video(kind, data, output_path):
         wavs.append(x)
         speech_dur.append(len(x) / music.SR)
 
-    # 2) timeline
     starts, durs, t0 = [], [], 0.0
     pres = [scene_pre(sc) if i > 0 else 0.0 for i, sc in enumerate(scenes)]
     for i, sd in enumerate(speech_dur):
@@ -226,7 +217,6 @@ def create_video(kind, data, output_path):
     total = t0
     n_frames = int(round(total * FPS))
 
-    # 3) audio: awaaz + music + sfx
     voice_track = np.zeros(int(total * music.SR) + music.SR, np.float32)
     sfx = []
     for i, sc in enumerate(scenes):
@@ -239,24 +229,22 @@ def create_video(kind, data, output_path):
     music.write_wav(audio_path, mixed)
     print(f"[{kind}] audio ready ({total:.1f}s, mood={mood})", flush=True)
 
-    # 4) captions
     info = [(starts[i] + pres[i], speech_dur[i], sc["narration"]) for i, sc in enumerate(scenes)]
     build_ass(p, info, os.path.join(tmp, "cap.ass"))
 
-    # 5) frames -> ffmpeg (pipe)
     abs_out = os.path.abspath(output_path)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{p['W']}x{p['H']}",
            "-r", str(FPS), "-i", "-", "-i", audio_path,
            "-vf", f"scale={p['OW']}:{p['OH']}:flags=lanczos,subtitles=cap.ass:fontsdir=/usr/share/fonts/truetype/dejavu",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20" if kind == "short" else "21", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", abs_out]
-    try:  # Kokoro model ka bojh/threads hata do, ab sirf frames banane hain
+    try:
         voice._pipe = None
         import gc
         gc.collect()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
-    faulthandler.dump_traceback_later(120, repeat=True)  # kahin atke to log mein dikhe kahan
+    faulthandler.dump_traceback_later(120, repeat=True)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, cwd=tmp)
     renderer, cur_i, envs = None, -1, {}
     thumb_done = kind != "long"
@@ -282,7 +270,7 @@ def create_video(kind, data, output_path):
             if not thumb_done and i == 0 and lt >= 0.9:
                 try:
                     make_thumbnail(frame, data.get("thumb_text") or data["topic"].upper())
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     print(f"  thumbnail skipped: {e}")
                 thumb_done = True
             try:
@@ -318,7 +306,7 @@ def main():
         with open(sj, encoding="utf-8") as f:
             data = json.load(f)
         _, credit = create_video(kind, data, out)
-        if credit:  # CC-BY music ho to credit description mein khud lag jaye
+        if credit:
             data["description"] = (data.get("description", "") + "\n\n" + credit).strip()
             with open(sj, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
