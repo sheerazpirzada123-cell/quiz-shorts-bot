@@ -27,6 +27,8 @@ env:
   # Har run is se zyada se zyada itne minute baad post karega (random minutes + seconds).
   # Private repo ho to free minutes bachane ke liye ise kam kar dein (e.g. 90).
   MAX_DELAY_MIN: "240"
+  # Long video ki script lambai (words): 1500 = ~9 min, 1700 = ~10 min.
+  LONG_TARGET_WORDS: "1500"
   # cron par hamesha both; manual run par jo option chuna wo.
   MODE: ${{ inputs.mode || 'both' }}
   DO_UPLOAD: ${{ (github.event_name == 'workflow_dispatch' && inputs.upload == false) && 'false' || 'true' }}
@@ -70,13 +72,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python script_gen.py
 
-      - name: Render video (free AI images + Kokoro voice)
+      - name: Render video (code-drawn stick-man animation + Kokoro voice + music)
         env:
-          # Sab optional hain. Image chain: Cloudflare -> Pollinations -> AI Horde (anonymous, unlimited)
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
-          HORDE_API_KEY: ${{ secrets.HORDE_API_KEY }}
+          # Koi image API nahi. Music code se banta hai (MUSIC_MODE=download karne par Kevin MacLeod CC-BY track utarta hai)
+          MUSIC_MODE: synth
         run: python render.py
 
       - name: Upload to YouTube
