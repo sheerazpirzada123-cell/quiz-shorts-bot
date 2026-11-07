@@ -26,7 +26,7 @@ def get_youtube_client():
         client_secret=os.environ["YOUTUBE_CLIENT_SECRET"].strip(),
         token_uri=TOKEN_URI,
     )
-    creds.refresh(Request())  # access token fresh banata hai
+    creds.refresh(Request())
     return build("youtube", "v3", credentials=creds)
 
 
@@ -35,7 +35,6 @@ def upload_video(youtube, video_path, title, description, tags):
         "snippet": {"title": title[:100], "description": description[:4900], "tags": tags, "categoryId": "27"},
         "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
     }
-    # Badi file (long video) ke liye chunked resumable upload, 5xx par retry
     media = MediaFileUpload(video_path, mimetype="video/mp4", chunksize=16 * 1024 * 1024, resumable=True)
     req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
     print(f"Uploading: {title}")
@@ -60,17 +59,16 @@ def set_thumbnail(youtube, video_id, path="thumbnail.jpg"):
     try:
         youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(path, mimetype="image/jpeg")).execute()
         print("Thumbnail set")
-    except Exception as e:  # noqa: BLE001  (channel verified na ho to YouTube mana kar deta hai)
+    except Exception as e:
         print(f"Thumbnail skipped: {str(e)[:160]}")
 
 
 def post_link_comment(youtube, video_id, text):
-    """Best effort: token mein comment permission na ho to chupchap skip."""
     try:
         youtube.commentThreads().insert(part="snippet", body={"snippet": {
             "videoId": video_id, "topLevelComment": {"snippet": {"textOriginal": text}}}}).execute()
         print("Link comment posted")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"Link comment skipped: {str(e)[:120]}")
 
 
