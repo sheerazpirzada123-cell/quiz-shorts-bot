@@ -148,23 +148,23 @@ def blit(img, spr, cx, cy, scale=1.0, alpha=1.0):
 class Stage:
     def __init__(self, W, H, portrait):
         self.W, self.H, self.portrait = W, H, portrait
-        self.s = 0.8 if portrait else 1.0          # prop scale
-        self.ground = int(H * (0.67 if portrait else 0.80))
-        self.char_h = 470 if portrait else 340
+        self.s = 1.0 if portrait else 1.15          # prop scale
+        self.ground = int(H * (0.725 if portrait else 0.835))
+        self.char_h = 640 if portrait else 425      # pehle 470/340 tha: ab characters frame bhar dete hain
 
     def char_x(self, n, i):
         """n characters (1 ya 2), i-th ka x."""
         if n == 1:
             return self.W * 0.5
-        return self.W * ([0.34, 0.68] if self.portrait else [0.38, 0.64])[i]
+        return self.W * ([0.36, 0.72] if self.portrait else [0.37, 0.64])[i]
 
     def sky_slots(self):
         if self.portrait:
-            return [(0.24, 0.23), (0.76, 0.23), (0.5, 0.17)]
-        return [(0.20, 0.34), (0.80, 0.34), (0.5, 0.22)]
+            return [(0.2, 0.30), (0.8, 0.30), (0.85, 0.47)]
+        return [(0.17, 0.36), (0.83, 0.36), (0.92, 0.62)]
 
     def ground_slots(self):
-        return [(0.13, 1), (0.87, 1), (0.5, 1)] if not self.portrait else [(0.14, 1), (0.86, 1), (0.5, 1)]
+        return [(0.12, 1), (0.88, 1), (0.28, 1)] if not self.portrait else [(0.12, 1), (0.88, 1), (0.25, 1)]
 
 
 # ------------------------------------------------------------------ backgrounds
@@ -847,15 +847,23 @@ PROP_TABLE = {
 
 
 # ------------------------------------------------------------------ character poses
+def _walk_dx(fast, t):
+    """Chalte/daudte character ka x-sarakna (character-height ke hisab se), frame ke andar hi rehta hai."""
+    return min(0.29, max(-0.29, -0.29 + (0.20 if fast else 0.07) * t))
+
+
 def pose(action, t, ph):
     s, pi2 = math.sin, 2 * math.pi
     w = pi2 * t
     P = dict(aF=8, eF=12, aB=-8, eB=12, lF=0, kF=0, lB=0, kB=0, lean=0, dx=0.0, dy=0.004 * s(w * 0.9 + ph), tilt=0)
-    if action == "talk":
+    if action == "idle":
+        P.update(aF=7 + 4 * s(w * 0.8 + ph), eF=14, aB=-7 - 4 * s(w * 0.8 + ph + 1), eB=14,
+                 tilt=2 * s(w * 0.5 + ph), dy=0.005 * s(w * 1.1 + ph))
+    elif action == "talk":
         P.update(aF=38 + 26 * s(w * 1.15 + ph), eF=45 + 30 * s(w * 1.15 + ph + 1.2), aB=-12 + 14 * s(w * 0.7 + ph + 2),
                  eB=25 + 15 * s(w * 0.7 + ph), tilt=3 * s(w * 0.8 + ph))
     elif action == "wave":
-        P.update(aF=135, eF=32 * s(w * 3.2), tilt=4 * s(w * 1.6))
+        P.update(aF=118, eF=34 * s(w * 3.2), tilt=4 * s(w * 1.6))
     elif action == "point":
         P.update(aF=95 + 5 * s(w * 2), eF=3, lean=4)
     elif action in ("walk", "run"):
@@ -864,16 +872,17 @@ def pose(action, t, ph):
         amp, kn = (50, 70) if fast else (30, 40)
         P.update(lF=amp * s(f), lB=-amp * s(f), kF=kn * max(0, math.cos(f)), kB=kn * max(0, -math.cos(f)),
                  aF=-(55 if fast else 24) * s(f), eF=(80 if fast else 18), aB=(55 if fast else 24) * s(f), eB=(80 if fast else 18),
-                 lean=14 if fast else 5, dy=(-0.03 if fast else 0.012) * abs(s(f)) * (1 if not fast else -1),
-                 dx=min(0.45, max(-0.35, -0.35 + (0.32 if fast else 0.1) * t)))
+                 lean=14 if fast else 5, dy=(0.03 if fast else 0.012) * abs(s(f)),
+                 dx=_walk_dx(fast, t))
     elif action == "jump":
         u = abs(s(w * 0.8))
-        P.update(dy=-0.2 * u, aF=20 + 110 * u, eF=20, aB=-20 - 110 * u, eB=-20, kF=35 * (1 - u), kB=35 * (1 - u), lF=8, lB=-8)
+        P.update(dy=-0.22 * u + 0.035 * (1 - u) ** 5, aF=20 + 100 * u, eF=20, aB=-20 - 110 * u, eB=-20,
+                 kF=35 * (1 - u), kB=35 * (1 - u), lF=8, lB=-8)
     elif action == "celebrate":
-        P.update(dy=-0.09 * abs(s(w * 1.6)), aF=150 + 10 * s(w * 3), eF=10, aB=-150 - 10 * s(w * 3), eB=-10, kF=20, kB=20, tilt=5 * s(w))
+        P.update(dy=-0.09 * abs(s(w * 1.6)), aF=124 + 12 * s(w * 3), eF=10, aB=-140 - 12 * s(w * 3), eB=-10, kF=20, kB=20, tilt=5 * s(w))
     elif action == "shock":
         e = ease_out(t / 0.25)
-        P.update(dx=-0.1 * e + 0.004 * s(w * 18), lean=-12 * e, aF=110 * e + 8, eF=40 * e, aB=-100 * e - 8, eB=-40 * e,
+        P.update(dx=-0.05 * e + 0.004 * s(w * 18), lean=-12 * e, aF=110 * e + 8, eF=40 * e, aB=-100 * e - 8, eB=-40 * e,
                  dy=-0.03 * e * (1 - e) * 4 + 0.003 * s(w * 20))
     elif action == "think":
         P.update(aF=35, eF=140, aB=15, eB=75, tilt=6 * s(w * 0.5), lean=3)
@@ -902,76 +911,416 @@ def _limb(o, a1, bend, l1, l2, f):
     return p1, p2
 
 
-HAIR_COLS = [C(108, 68, 42), C(70, 46, 32), C(158, 84, 42), C(92, 80, 72)]
-FUR = C(142, 98, 60)
-FUR_DARK = C(86, 56, 34)
-FUR_LIGHT = C(180, 132, 86)
+# ------------------------------------------------------------------ colour / curve helpers
+def _shade(c, k):
+    return tuple(int(max(0, min(255, v * k))) for v in c)
+
+
+def _tint(c, k):
+    return tuple(int(v + (255 - v) * k) for v in c)
+
+
+def _cr(pts, n=6, closed=False):
+    """Catmull-Rom smooth curve through points (naram, saaf lakeerein)."""
+    P = list(pts)
+    if len(P) < 3:
+        return P
+    P = ([P[-1]] + P + [P[0], P[1]]) if closed else ([P[0]] + P + [P[-1]])
+    out = []
+    for i in range(1, len(P) - 2):
+        p0, p1, p2, p3 = P[i - 1], P[i], P[i + 1], P[i + 2]
+        for k in range(n):
+            u = k / n
+            u2, u3 = u * u, u * u * u
+            out.append((0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * u + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * u2
+                               + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * u3),
+                        0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * u + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * u2
+                               + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * u3)))
+    if not closed:
+        out.append(P[-2])
+    return out
+
+
+def fade_circ(img, c, r, col, alpha):
+    """Aadha-shaffaf gola (dhool ke baadal waghera)."""
+    x, y, r = int(c[0]), int(c[1]), int(r) + 3
+    H, W = img.shape[:2]
+    x0, y0, x1, y1 = max(0, x - r), max(0, y - r), min(W, x + r + 1), min(H, y + r + 1)
+    if x0 >= x1 or y0 >= y1 or alpha <= 0:
+        return
+    roi = img[y0:y1, x0:x1]
+    ov = roi.copy()
+    cv2.circle(ov, (x - x0, y - y0), max(1, r - 3), col, -1, cv2.LINE_AA)
+    cv2.addWeighted(ov, min(alpha, 1.0), roi, 1 - min(alpha, 1.0), 0, dst=roi)
+
+
+def _star4(img, c, r, col):
+    k = 0.28
+    pts = [(c[0], c[1] - r), (c[0] + r * k, c[1] - r * k), (c[0] + r, c[1]), (c[0] + r * k, c[1] + r * k),
+           (c[0], c[1] + r), (c[0] - r * k, c[1] + r * k), (c[0] - r, c[1]), (c[0] - r * k, c[1] - r * k)]
+    poly(img, pts, col, BLACK, 2)
+
+
+def _drop(img, x, y, r, col=None):
+    col = col or C(120, 200, 255)
+    poly(img, [(x, y - 2.0 * r), (x - 0.82 * r, y - 0.3 * r), (x + 0.82 * r, y - 0.3 * r)], col, None)
+    circ(img, (x, y), r, col)
+    circ(img, (x - 0.3 * r, y - 0.2 * r), 0.25 * r, WHITE)
+
+
+# ------------------------------------------------------------------ palettes
+HAIR_PALETTE = [C(34, 30, 32), C(86, 54, 34), C(132, 84, 46), C(226, 178, 80), C(172, 70, 36), C(150, 150, 158)]
+FUR = C(150, 104, 62)
+FUR_DARK = C(92, 60, 36)
+FUR_LIGHT = C(190, 142, 94)
+LEOPARD = C(232, 176, 70)
 
 
 def _hair_col(ch):
-    return HAIR_COLS[zlib.crc32(str(ch.get("name", "x")).encode()) % len(HAIR_COLS)]
+    k = zlib.crc32(str(ch.get("name", "x")).encode()) % len(HAIR_PALETTE)
+    if ch.get("gender") == "female" and k == 5:
+        k = 3
+    return HAIR_PALETTE[k]
 
 
-def _draw_hair(img, hc, hr, f, th, kind, col, seed, t, ph):
-    """Bikhre hue, haath se bane baal (image-3 jaisa). kind: short / long."""
-    rnd = np.random.RandomState(seed % 100000)
-    n = 24 if kind == "short" else 28
-    strands = []
-    for k in range(n):
-        a = math.radians(rnd.uniform(6, 174))
-        r0 = hr * rnd.uniform(0.78, 1.0)
-        base = (hc[0] + math.cos(a) * r0, hc[1] - math.sin(a) * r0)
-        L = hr * rnd.uniform(0.3, 0.72)
-        da = a + math.radians(rnd.uniform(-38, 38))
-        sw = math.sin(t * 2.2 + k * 1.3 + ph) * 0.05 * hr
-        mid = (base[0] + math.cos(da) * L * 0.55, base[1] - math.sin(da) * L * 0.55)
-        tip = (base[0] + math.cos(da) * L + sw, base[1] - math.sin(da) * L)
-        strands.append([base, mid, tip])
+# ------------------------------------------------------------------ hair
+def _hair_back(img, HL, hr, th, col, t, ph, trail, seed):
+    """Peeche ke lambe baal (sar aur kamar ke peeche behte hue)."""
+    sw = math.sin(t * 2.0 + ph) * 0.20 + trail
+
+    def Wp(dx, dy):
+        wgt = min(1.0, max(0.0, (dy - 0.2) / 2.4)) ** 1.4
+        return HL(dx - sw * wgt, dy)
+
+    ctrl = [(-0.15, -1.13), (-0.80, -1.0), (-1.16, -0.45), (-1.26, 0.35), (-1.36, 1.2), (-1.30, 2.0), (-1.18, 2.62),
+            (-0.82, 2.84), (-0.50, 2.52), (-0.18, 2.86), (0.14, 2.5), (0.30, 1.6), (0.42, 0.5), (0.45, -0.7), (0.3, -1.1)]
+    pts = _cr([Wp(*c) for c in ctrl], 4, closed=True)
+    poly(img, pts, col, None)
+    dk = _shade(col, 0.72)
+    for a, b, c_ in (((-0.72, 0.5), (-0.9, 1.5), (-0.86, 2.55)), ((-1.0, 0.8), (-1.12, 1.7), (-1.05, 2.6)),
+                     ((-0.45, 0.9), (-0.55, 1.8), (-0.35, 2.6))):
+        pline(img, _cr([Wp(*a), Wp(*b), Wp(*c_)], 5), max(2, th * 0.32), dk)
+    pline(img, _cr([Wp(-0.95, 0.1), Wp(-1.08, 1.2), Wp(-1.02, 2.1)], 5), max(2, th * 0.4), _tint(col, 0.3))
+    poly(img, pts, None, BLACK, max(3.0, th * 0.6))
+
+
+def _hair_front(img, HL, hr, th, col, female, style, t, ph):
+    ow = max(3.0, th * 0.6)
+
+    def arc(R, a0, a1, n=16, spike=0.0):
+        out = []
+        for i in range(n + 1):
+            a = a0 + (a1 - a0) * i / n
+            r = R
+            if spike:
+                tri = abs(((a / 20.0) % 2.0) - 1.0)
+                r = R * (1 + spike * tri)
+            ar = math.radians(a)
+            out.append(HL(math.cos(ar) * r, -math.sin(ar) * r))
+        return out
+
+    if female:
+        outer = arc(1.10, 200, 8, 22)
+        fringe = _cr([HL(0.99, -0.18), HL(0.84, -0.40), HL(0.55, -0.60), HL(0.20, -0.68), HL(-0.20, -0.60),
+                      HL(-0.60, -0.42), HL(-0.92, -0.05)], 4)
+        strands = [[HL(0.1, -1.05), HL(0.5, -0.85), HL(0.82, -0.48)], [HL(-0.3, -1.02), HL(0.05, -0.9), HL(0.3, -0.7)]]
+    elif style == 0:  # khade (spiky) baal
+        outer = arc(1.06, 195, 22, 26, spike=0.22)
+        fringe = [HL(0.90, -0.36), HL(0.74, -0.52), HL(0.60, -0.34), HL(0.42, -0.58), HL(0.26, -0.40), HL(0.08, -0.62),
+                  HL(-0.20, -0.48), HL(-0.45, -0.62), HL(-0.75, -0.38), HL(-0.92, -0.12)]
+        strands = [[HL(0.0, -1.15), HL(0.1, -0.85)], [HL(0.5, -1.05), HL(0.55, -0.72)]]
+    elif style == 1:  # side-part
+        outer = _cr([HL(-1.04, 0.28), HL(-1.13, -0.30), HL(-0.82, -0.86), HL(-0.20, -1.16), HL(0.45, -1.16), HL(0.98, -0.78),
+                     HL(1.10, -0.36)], 4)
+        fringe = _cr([HL(0.97, -0.28), HL(0.78, -0.48), HL(0.50, -0.64), HL(0.15, -0.60), HL(-0.30, -0.56), HL(-0.70, -0.40),
+                      HL(-0.92, -0.10)], 4)
+        strands = [[HL(0.35, -1.12), HL(0.30, -0.86), HL(0.18, -0.64)], [HL(-0.3, -1.1), HL(-0.35, -0.8)]]
+    else:  # chhote crop
+        outer = arc(1.04, 192, 28, 20)
+        fringe = _cr([HL(0.93, -0.40), HL(0.60, -0.70), HL(0.0, -0.78), HL(-0.60, -0.66), HL(-0.93, -0.20)], 4)
+        strands = []
+    pts = outer + fringe
+    poly(img, pts, col, None)
     for s_ in strands:
-        pline(img, s_, max(4, th * 1.25), col)
-    for s_ in strands:
-        pline(img, s_, max(2, th * 0.42), BLACK)
-    # topi jaisa baalon ka hissa
-    outer = [(hc[0] + hr * 1.0 * math.cos(math.radians(a)), hc[1] - hr * 1.0 * math.sin(math.radians(a))) for a in range(8, 173, 11)]
-    fr = np.random.RandomState((seed + 5) % 100000)
-    inner = [(hc[0] + f * 0.12 * hr + hr * 0.95 * math.cos(math.radians(a)),
-              hc[1] - hr * (0.28 + 0.4 * math.sin(math.radians(a)) + fr.uniform(-0.1, 0.1))) for a in range(172, 7, -11)]
-    poly(img, outer + inner, col, None)
-    pline(img, inner, max(2, th * 0.5), BLACK)
-    for _ in range(7):  # bal ke andar lakeerein
-        a = math.radians(fr.uniform(25, 155))
-        p0 = (hc[0] + math.cos(a) * hr * 0.9, hc[1] - math.sin(a) * hr * 0.92)
-        p1 = (hc[0] + math.cos(a) * hr * 0.5, hc[1] - math.sin(a) * hr * 0.55 - hr * 0.1)
-        line(img, p0, p1, max(2, th * 0.4), BLACK)
+        pline(img, s_, max(2, th * 0.38), _shade(col, 0.7))
+    # chamak ki patti
+    ar = [HL(math.cos(math.radians(a)) * 0.84, -math.sin(math.radians(a)) * 0.84) for a in range(132, 66, -8)]
+    pline(img, ar, max(2, th * 0.5), _tint(col, 0.34))
+    poly(img, pts, None, BLACK, ow)
 
 
-def _fur_pelt(img, sho, hip, f, h, th, seed):
-    """Jaanwar ki khaal (fur) - kandhe se kamar tak, kinare jagged (image-3 jaisa)."""
-    rnd = np.random.RandomState(seed % 100000)
-    wd, hw = 0.085 * h, 0.15 * h
-    hem = hip[1] + 0.10 * h
-    cx = hip[0] + f * 0.02 * h
-    top = [(sho[0] - wd, sho[1] + 0.005 * h), (sho[0] + wd * 0.55, sho[1] - 0.006 * h)]
-    right = (cx + hw, hem)
-    left = (cx - hw, hem)
-    zig = []
-    n = 9
-    for i in range(n + 1):
-        tt = i / n
-        zig.append((right[0] + (left[0] - right[0]) * tt, hem + (0.045 * h if i % 2 else 0.0) + rnd.uniform(-0.01, 0.012) * h))
-    # tail (peeche ki taraf)
-    tx = cx - f * hw * 0.9
-    tail = [(tx, hem - 0.03 * h), (tx - f * 0.05 * h, hem + 0.09 * h), (tx - f * 0.02 * h, hem + 0.13 * h), (tx + f * 0.03 * h, hem + 0.05 * h)]
-    poly(img, tail, FUR, BLACK, 2)
-    pts = top + zig
-    poly(img, _wob(pts, seed, 1.2), FUR, None)
-    shade = [(sho[0] + wd * 0.1, sho[1]), (sho[0] + wd * 0.55, sho[1])] + zig[:n // 2 + 1] + [(cx + hw * 0.1, hem)]
-    poly(img, shade, FUR_DARK, None)
-    for _ in range(18):  # fur ki lakeerein
-        x = rnd.uniform(min(left[0], top[0][0]), max(right[0], top[1][0]))
-        y = rnd.uniform(sho[1] + 0.03 * h, hem)
-        line(img, (x, y), (x + rnd.uniform(-4, 4), y + rnd.uniform(8, 16)), 2, FUR_DARK if rnd.rand() < 0.6 else FUR_LIGHT)
-    poly(img, _wob(pts, seed, 1.2), None, BLACK, max(2, th * 0.55))
+# ------------------------------------------------------------------ garments
+def _sleeve(img, a, b, wd, col, ow):
+    circ(img, a, wd / 2 + ow / 2, BLACK)
+    circ(img, b, wd / 2 + ow / 2, BLACK)
+    line(img, a, b, wd + ow, BLACK)
+    circ(img, a, wd / 2, col)
+    circ(img, b, wd / 2, col)
+    line(img, a, b, wd, col)
+
+
+def _tp_factory(hip, sho):
+    dx, dy = sho[0] - hip[0], sho[1] - hip[1]
+    L = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy / L, dx / L
+
+    def TP(tt, w):
+        return (hip[0] + dx * tt + nx * w, hip[1] + dy * tt + ny * w)
+    return TP
+
+
+def _draw_cape(img, sho, hip, f, h, col, t, ph, tr):
+    back = -f
+    sw = math.sin(t * 3 + ph) * 0.03 * h
+    tail = tr
+    ctrl = [(sho[0] - back * 0.02 * h, sho[1] - 0.012 * h),
+            (sho[0] + back * (0.10 * h + tail * 0.5), sho[1] + 0.07 * h),
+            (sho[0] + back * (0.19 * h + tail) + sw, hip[1] + 0.02 * h),
+            (sho[0] + back * (0.27 * h + tail * 1.4) + sw * 1.4, hip[1] + 0.27 * h),
+            (sho[0] + back * (0.16 * h + tail * 0.7) + sw, hip[1] + 0.35 * h),
+            (sho[0] + back * 0.04 * h + sw * 0.4, hip[1] + 0.31 * h),
+            (sho[0] - back * 0.035 * h, sho[1] + 0.07 * h)]
+    pts = _cr(ctrl, 5, closed=True)
+    poly(img, pts, col, None)
+    inner = _cr([ctrl[0], ctrl[1], ctrl[2], (ctrl[3][0] - back * 0.07 * h, ctrl[3][1] - 0.03 * h), ctrl[5], ctrl[6]], 5, closed=True)
+    poly(img, inner, _shade(col, 0.78), None)
+    poly(img, pts, None, BLACK, max(3.0, h * 0.011))
+
+
+def _fur_patch(img, pts, base, rnd, th, spots):
+    poly(img, pts, base, None)
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    for _ in range(9 if spots else 12):
+        x, y = rnd.uniform(x0, x1), rnd.uniform(y0, y1)
+        if spots:
+            circ(img, (x, y), th * 0.55, C(90, 52, 28))
+        else:
+            line(img, (x, y), (x + rnd.uniform(-3, 3), y + rnd.uniform(7, 13)), 2, FUR_DARK if rnd.rand() < 0.65 else FUR_LIGHT)
+    poly(img, pts, None, BLACK, max(3.0, th * 0.55))
+
+
+def _draw_garment(img, kind, col, hip, sho, f, h, th, t, ph, P, seed, moving):
+    TP = _tp_factory(hip, sho)
+    ow = max(3.0, th * 0.55)
+    dark, darker, light = _shade(col, 0.76), _shade(col, 0.55), _tint(col, 0.38)
+    tr = 0.0045 * P["lean"] * h if moving else 0.0
+    cx = hip[0] - f * tr * 0.5
+    flut = math.sin(t * 3 + ph) * 0.008 * h
+
+    def hem_curve(xr, xl, y, depth, scallops=0, n=40):
+        out = []
+        for i in range(n + 1):
+            u = i / n
+            yy = y + depth * math.sin(math.pi * u) + flut * (0.5 - u)
+            if scallops:
+                yy += 0.028 * h * abs(math.sin(math.pi * scallops * u))
+            out.append((xr + (xl - xr) * u, yy))
+        return out
+
+    if kind == "tunic":
+        hem_y, hw = hip[1] + 0.125 * h, 0.14 * h
+        sh_w, wa_w, hp_w = 0.09 * h, 0.067 * h, 0.10 * h
+        R = _cr([TP(1.0, sh_w), TP(0.7, sh_w * 0.93), TP(0.38, wa_w), TP(0.12, hp_w), (cx + hw, hem_y)], 5)
+        Lf = _cr([TP(1.0, -sh_w), TP(0.7, -sh_w * 0.93), TP(0.38, -wa_w), TP(0.12, -hp_w), (cx - hw, hem_y)], 5)
+        hem = hem_curve(cx + hw, cx - hw, hem_y, 0.015 * h, 0, 16)
+        body = Lf + hem[::-1] + R[::-1]
+        poly(img, body, col, None)
+        poly(img, [TP(1.0, sh_w * 0.3)] + R + hem[:9] + [TP(0.0, hp_w * 0.25)], dark, None)
+        pline(img, hem, max(3, th * 0.55), darker)
+        for u in (-0.45, 0.2):
+            line(img, TP(0.1, hp_w * u), (cx + hw * u * 0.9, hem_y - 0.03 * h), 2, dark)
+        by = 0.2
+        line(img, TP(by, -hp_w * 0.96), TP(by, hp_w * 0.96), max(4, th * 0.95), COL["wood"])
+        rect(img, TP(by, 0)[0] - th * 0.55, TP(by, 0)[1] - th * 0.55, TP(by, 0)[0] + th * 0.55, TP(by, 0)[1] + th * 0.55, COL["gold"], BLACK, 2)
+        poly(img, [TP(1.0, -0.04 * h), TP(0.88, 0), TP(1.0, 0.04 * h)], light, BLACK, max(2, th * 0.4))
+        poly(img, body, None, BLACK, ow)
+    elif kind == "dress":
+        hem_y, hw = hip[1] + 0.38 * h, 0.235 * h
+        sh_w, wa_w = 0.074 * h, 0.052 * h
+        sway = math.sin(t * 2.6 + ph) * 0.012 * h
+        cx2 = cx + sway * 0.4
+        R = _cr([TP(1.0, sh_w), TP(0.74, sh_w * 0.9), TP(0.46, wa_w), (hip[0] + 0.075 * h - f * tr * 0.25, hip[1] - 0.02 * h),
+                 (cx2 + hw * 0.7, hip[1] + 0.2 * h), (cx2 + hw, hem_y)], 5)
+        Lf = _cr([TP(1.0, -sh_w), TP(0.74, -sh_w * 0.9), TP(0.46, -wa_w), (hip[0] - 0.075 * h - f * tr * 0.25, hip[1] - 0.02 * h),
+                  (cx2 - hw * 0.7, hip[1] + 0.2 * h), (cx2 - hw, hem_y)], 5)
+        hem = hem_curve(cx2 + hw, cx2 - hw, hem_y, 0.0, 5)
+        body = Lf + hem[::-1] + R[::-1]
+        poly(img, body, col, None)
+        poly(img, [TP(1.0, sh_w * 0.25)] + R + hem[:21] + [TP(0.3, wa_w * 0.2)], dark, None)
+        wy = TP(0.46, 0)[1]
+        for u in (-0.55, -0.15, 0.3, 0.7):  # skirt ki silwatein
+            pline(img, _cr([(cx2 * 0.0 + TP(0.4, 0)[0] + u * wa_w, wy + 0.01 * h), (cx2 + hw * u * 0.55, hip[1] + 0.2 * h),
+                            (cx2 + hw * u * 0.92, hem_y - 0.02 * h)], 4), 2, dark)
+        pline(img, [(p[0], p[1] - 0.05 * h) for p in hem[3:-3]], max(3, th * 0.5), light)
+        line(img, TP(0.46, -wa_w * 1.02), TP(0.46, wa_w * 1.02), max(4, th * 0.9), light)
+        bw = TP(0.46, wa_w * 1.0)
+        poly(img, [bw, (bw[0] + 0.055 * h, bw[1] - 0.035 * h), (bw[0] + 0.055 * h, bw[1] + 0.035 * h)], light, BLACK, 2)
+        poly(img, [bw, (bw[0] - 0.05 * h, bw[1] - 0.033 * h), (bw[0] - 0.05 * h, bw[1] + 0.033 * h)], light, BLACK, 2)
+        poly(img, [TP(1.0, -0.04 * h), TP(0.9, 0), TP(1.0, 0.04 * h)], WHITE, BLACK, max(2, th * 0.4))
+        poly(img, body, None, BLACK, ow)
+    elif kind == "robe":
+        hem_y, hw = hip[1] + 0.445 * h, 0.205 * h
+        sh_w, wa_w = 0.098 * h, 0.08 * h
+        R = _cr([TP(1.0, sh_w), TP(0.62, sh_w * 0.96), TP(0.3, wa_w), (cx + 0.12 * h, hip[1] + 0.16 * h), (cx + hw, hem_y)], 5)
+        Lf = _cr([TP(1.0, -sh_w), TP(0.62, -sh_w * 0.96), TP(0.3, -wa_w), (cx - 0.12 * h, hip[1] + 0.16 * h), (cx - hw, hem_y)], 5)
+        hem = hem_curve(cx + hw, cx - hw, hem_y, 0.012 * h, 0)
+        body = Lf + hem[::-1] + R[::-1]
+        poly(img, body, col, None)
+        poly(img, [TP(1.0, sh_w * 0.2)] + R + hem[:21] + [(cx + hw * 0.05, hem_y - 0.01 * h)], dark, None)
+        pline(img, [TP(1.0, 0.0), TP(0.4, 0.004 * h), (cx + 0.01 * h, hip[1] + 0.2 * h), (cx + 0.015 * h, hem_y)], max(3, th * 0.5), light)
+        pline(img, hem, max(4, th * 0.7), COL["gold"])
+        line(img, TP(0.26, -wa_w * 1.03), TP(0.26, wa_w * 1.03), max(5, th * 1.35), darker)
+        k0 = TP(0.26, wa_w * 0.45)
+        line(img, k0, (k0[0] + 0.02 * h, k0[1] + 0.14 * h), max(4, th * 0.85), darker)
+        poly(img, [TP(1.0, -0.045 * h), TP(0.88, 0), TP(1.0, 0.045 * h)], light, BLACK, max(2, th * 0.4))
+        poly(img, body, None, BLACK, ow)
+    elif kind == "loincloth":
+        rnd = np.random.RandomState(seed % 100000)
+        spots = seed % 2 == 1
+        base = LEOPARD if spots else FUR
+        hem = hip[1] + 0.13 * h
+        xr, xl = cx + 0.12 * h, cx - 0.12 * h
+        zig = []
+        for i in range(10):
+            u = i / 9.0
+            zig.append((xr + (xl - xr) * u + rnd.uniform(-2, 2), hem + (0.05 * h if i % 2 else 0.0) + rnd.uniform(-0.008, 0.01) * h))
+        # ek kandhe wali khaal: ek kandha dhakta hai, tirchi gardan-line, neeche jagged kinara
+        pelt = _cr([TP(1.0, -0.092 * h), TP(1.02, -0.03 * h)], 2)[:-1] + [TP(1.0, -0.03 * h), TP(0.74, 0.045 * h),
+                                                                         TP(0.5, 0.082 * h), TP(0.22, 0.092 * h), (xr + 0.005 * h, hip[1] + 0.02 * h)]
+        pelt += zig + [(xl - 0.005 * h, hip[1] + 0.02 * h), TP(0.36, -0.092 * h), TP(0.7, -0.098 * h)]
+        _fur_patch(img, pelt, base, rnd, th, spots)
+        # kandhe ki patti aur kamar ki rassi
+        line(img, TP(0.62, 0.05 * h), TP(0.12, 0.095 * h), max(2, th * 0.4), FUR_DARK)
+        by = hip[1] + 0.005 * h
+        line(img, (xl, by), (xr, by), max(4, th * 0.8), COL["wood"])
+        circ(img, (cx + 0.02 * h, by), th * 0.55, COL["gold"])
+    # "none" -> bas stick-man
+    return
+
+
+# ------------------------------------------------------------------ face
+def _face(img, HL, hr, th, emo, female, t, ph, mouth, beard):
+    lw = max(2.0, th * 0.36)
+    blink = (t + ph) % 3.6 < 0.13
+    big = emo in ("surprised", "scared")
+    ey = -0.06
+    for sgn in (-1, 1):
+        ex = 0.16 + sgn * 0.38
+        e = HL(ex, ey)
+        if blink and not big:
+            pline(img, [HL(ex - 0.16, ey + 0.0), HL(ex, ey + 0.07), HL(ex + 0.16, ey + 0.0)], max(2.5, th * 0.45))
+        elif big:
+            circ(img, e, 0.27 * hr, WHITE)
+            circ(img, e, 0.27 * hr, BLACK, lw)
+            circ(img, HL(ex + 0.05, ey), 0.075 * hr, BLACK)
+        else:
+            sq = 0.78 if emo == "angry" else 1.0
+            ell(img, e, (0.17 * hr, 0.22 * hr * sq), 0, 0, 360, WHITE)
+            ell(img, e, (0.17 * hr, 0.22 * hr * sq), 0, 0, 360, BLACK, lw)
+            circ(img, HL(ex + 0.07, ey + 0.01), 0.105 * hr, BLACK)
+            circ(img, HL(ex + 0.03, ey - 0.05), 0.035 * hr, WHITE)
+            if female:
+                ell(img, e, (0.17 * hr, 0.22 * hr), 0, 200, 340, BLACK, max(3, th * 0.55))
+                for dd in (0.0, 0.13):
+                    pline(img, [HL(ex + sgn * (0.15 + dd * 0.5), ey - 0.10 - dd * 0.3), HL(ex + sgn * (0.30 + dd * 0.6), ey - 0.2 - dd * 0.6)],
+                          max(2, th * 0.3))
+        # bhaunein
+        by = ey - (0.5 if emo in ("surprised", "scared", "excited") else 0.38)
+        bw = max(3.0, th * (0.42 if female else 0.62))
+        inner, outer = ex - sgn * 0.19, ex + sgn * 0.19
+        if emo == "angry":
+            pline(img, [HL(inner, by + 0.14), HL(outer, by - 0.08)], bw)
+        elif emo in ("sad", "scared"):
+            pline(img, [HL(inner, by - 0.12), HL(outer, by + 0.06)], bw)
+        else:
+            lift = -0.14 if (emo == "curious" and sgn == 1) else 0.0
+            pline(img, _cr([HL(outer, by + 0.03 + lift), HL(ex, by - 0.04 + lift), HL(inner, by + 0.0 + lift)], 4), bw)
+        if emo in ("happy", "excited") or (female and emo in ("neutral", "curious")):
+            ell(img, HL(ex + sgn * 0.12, 0.3), (0.15 * hr, 0.085 * hr), 0, 0, 360, C(255, 176, 176))
+    # tears (sad)
+    if emo == "sad":
+        age = (t * 0.8) % 1.0
+        p = HL(0.54, 0.16 + age * 0.9)
+        _drop(img, p[0], p[1], 0.09 * hr * (1 - 0.3 * age))
+    # munh
+    my = 0.5 if beard else 0.46
+    m = HL(0.18, my)
+    wth = max(2.5, th * 0.45)
+    op = mouth
+    if op > 0.1:
+        vis = abs(math.sin(t * 21 + ph))
+        mw = (0.19 + 0.11 * op) * (0.85 + 0.3 * vis) * hr
+        mh = (0.05 + 0.25 * op) * (1.1 - 0.25 * vis) * hr
+        ell(img, m, (mw, mh), 0, 0, 360, (40, 40, 140))
+        if op > 0.45:
+            ell(img, (m[0], m[1] + mh * 0.5), (mw * 0.6, mh * 0.42), 0, 0, 360, (110, 110, 230))
+        ell(img, m, (mw, mh), 0, 0, 360, BLACK, wth)
+    elif emo == "excited":
+        ell(img, (m[0], m[1] - 0.1 * hr), (0.32 * hr, 0.26 * hr), 0, 0, 180, (40, 40, 140))
+        ell(img, (m[0], m[1] - 0.1 * hr), (0.32 * hr, 0.26 * hr), 0, 0, 180, BLACK, wth)
+    elif emo == "happy":
+        ell(img, (m[0], m[1] - 0.08 * hr), (0.3 * hr, 0.21 * hr), 0, 15, 165, BLACK, wth)
+    elif emo in ("sad", "scared"):
+        ell(img, (m[0], m[1] + 0.14 * hr), (0.22 * hr, 0.14 * hr), 0, 195, 345, BLACK, wth)
+    elif emo == "surprised":
+        circ(img, m, 0.12 * hr, BLACK, wth)
+    elif emo == "angry":
+        pline(img, [HL(-0.02, my + 0.04), HL(0.18, my - 0.02), HL(0.38, my + 0.04)], wth)
+    elif emo == "curious":
+        pline(img, _cr([HL(0.0, my + 0.04), HL(0.2, my + 0.0), HL(0.4, my - 0.07)], 4), wth)
+    else:
+        pline(img, [HL(0.03, my), HL(0.33, my)], wth)
+
+
+def _fx(img, HL, hc, hr, th, h, f, emo, action, t, ph):
+    """Jazbaat ke chhote effects (paseena, shock lines, sochne ke bulbule, ghussa...)."""
+    if emo == "scared":
+        for k in (0, 1):
+            age = (t * 1.1 + k * 0.5) % 1.0
+            p = HL(0.98 + 0.2 * k, -0.55 + age * 1.5)
+            _drop(img, p[0], p[1], 0.12 * hr * (1 - 0.4 * age))
+    if action == "shock" and t < 1.0:
+        k0 = 1.0 - t
+        for k in range(9):
+            a = math.radians(k * 40 + 10)
+            r1 = hr * (1.45 + 0.1 * math.sin(t * 30 + k))
+            r2 = r1 + hr * 0.55 * k0
+            line(img, (hc[0] + math.cos(a) * r1, hc[1] + math.sin(a) * r1), (hc[0] + math.cos(a) * r2, hc[1] + math.sin(a) * r2),
+                 max(3, th * 0.5))
+    if action == "think":
+        for k, (dx, dy, r) in enumerate([(1.15, -1.0, 0.1), (1.5, -1.45, 0.17), (1.95, -2.0, 0.28)]):
+            pul = 1 + 0.08 * math.sin(t * 3 + k)
+            c = HL(dx, dy)
+            circ(img, c, r * hr * pul, WHITE)
+            circ(img, c, r * hr * pul, BLACK, max(2, th * 0.4))
+    if emo == "angry":
+        c = HL(0.8, -1.25)
+        d, rr = 0.2 * hr, 0.17 * hr * (1 + 0.1 * abs(math.sin(t * 8)))
+        RED = COL["red"]
+        for sx, sy, a0, a1 in ((-1, -1, 0, 90), (1, -1, 90, 180), (-1, 1, 270, 360), (1, 1, 180, 270)):
+            ell(img, (c[0] + sx * d, c[1] + sy * d), (rr, rr), 0, a0, a1, RED, max(3, th * 0.5))
+    if emo == "excited" or action == "celebrate":
+        for k in range(3):
+            sc = abs(math.sin(t * 5 + k * 2.1))
+            p = HL(-1.2 + 1.1 * k, -1.5 - 0.25 * (k % 2))
+            _star4(img, p, hr * 0.28 * sc, COL["gold"])
+
+
+def _confetti(img, W, H, t, seed):
+    rnd = np.random.RandomState(seed % 1000 + 5)
+    cols = [COL["red"], COL["gold"], COL["blue"], COL["green"], COL["pink"], COL["orange"]]
+    for i in range(34):
+        x = rnd.rand() * W + 24 * math.sin(t * 3 + i)
+        y = (rnd.rand() * H * 1.4 + t * H * 0.42 * (0.7 + 0.6 * rnd.rand())) % (H * 1.2) - H * 0.1
+        a = t * (3 + i % 4) + i
+        w_, h_ = 7 + i % 4, 12 + i % 5
+        ca, sa = math.cos(a), math.sin(a)
+        pts = [(x + dx * ca - dy * sa, y + dx * sa + dy * ca) for dx, dy in ((-w_, -h_), (w_, -h_), (w_, h_), (-w_, h_))]
+        poly(img, pts, cols[i % len(cols)], None)
+
+
+SLEEVED = ("tunic", "dress", "robe")
 
 
 def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
@@ -979,166 +1328,159 @@ def draw_char(st, img, ch, x, scale, action, emo, t, mouth, f, ph, ground=None):
     h = st.char_h * scale
     g = ground if ground is not None else st.ground
     P = pose(action, t, ph)
-    th = max(4.0, 0.021 * h)
+    if action != "shock":  # naye scene mein jhatke se nahi, narmi se pose mein aao
+        kb = ease_out(t / 0.22)
+        if kb < 1.0:
+            R = pose("idle", 0.0, ph)
+            for key in ("aF", "eF", "aB", "eB", "lF", "kF", "lB", "kB", "lean", "tilt"):
+                P[key] = R[key] + (P[key] - R[key]) * kb
+    P["dy"] -= 0.006 * mouth                                    # bolte waqt halka sa uchhalna
+    P["tilt"] += 2.2 * mouth * math.sin(t * 9 + ph)
+    moving = action in ("walk", "run")
+    th = max(4.0, 0.022 * h)
     thigh = shin = 0.235 * h
     hip = (x + P["dx"] * h * f, g - (thigh + shin) * 0.985 + P["dy"] * h)
     tl = 0.30 * h
     lean = math.radians(P["lean"])
     sho = (hip[0] + math.sin(lean) * tl * f, hip[1] - math.cos(lean) * tl)
-    hr = 0.13 * h
+    hr = 0.14 * h
     tilt = math.radians(P["lean"] + P["tilt"])
-    hc = (sho[0] + math.sin(tilt) * (hr + 0.03 * h) * f, sho[1] - math.cos(tilt) * (hr + 0.03 * h))
+    hc = (sho[0] + math.sin(tilt) * (hr + 0.025 * h) * f, sho[1] - math.cos(tilt) * (hr + 0.025 * h))
     col = COL.get(ch.get("color", "blue"), COL["blue"])
     garment, acc = ch.get("garment", "none"), ch.get("accessory", "none")
     female = ch.get("gender") == "female"
     seed = zlib.crc32(str(ch.get("name", "x")).encode()) % 100000
     hcol = _hair_col(ch)
+    ca_, sa_ = math.cos(tilt), math.sin(tilt)
 
-    # shadow
-    sc = tuple(int(c * 0.82) for c in img[min(img.shape[0] - 1, int(g + 4)), int(min(max(x, 0), img.shape[1] - 1))])
-    ell(img, (x + P["dx"] * h * f, g + 3), (0.26 * h * (1 - 0.25 * (-P["dy"] if P["dy"] < 0 else 0) * 4), 0.035 * h), 0, 0, 360, sc)
+    def HL(dx, dy):  # sar ke apne coordinates (aage = +dx, neeche = +dy), jhukav ke saath
+        return (hc[0] + f * (dx * ca_ - dy * sa_) * hr, hc[1] + (dx * sa_ + dy * ca_) * hr)
 
-    # cape (back)
+    # ---- zameen ka saaya + bhaagte waqt dhool
+    fx0 = x + P["dx"] * h * f
+    sc = tuple(int(c * 0.80) for c in img[min(img.shape[0] - 1, int(g + 4)), int(min(max(x, 0), img.shape[1] - 1))])
+    ell(img, (fx0, g + 3), (0.27 * h * (1 - 0.25 * (-P["dy"] if P["dy"] < 0 else 0) * 4), 0.036 * h), 0, 0, 360, sc)
+    if moving:
+        sps = 5.0 if action == "run" else 3.0
+        n_now = int(t * sps)
+        for n in range(max(0, n_now - 2), n_now + 1):
+            age = t - n / sps
+            if 0 <= age < 0.45:
+                tn = n / sps
+                dxn = _walk_dx(action == "run", tn)
+                px_ = x + dxn * h * f - f * 0.09 * h
+                fade_circ(img, (px_, g - 0.02 * h), h * (0.03 + 0.075 * age / 0.45), (232, 232, 232), (1 - age / 0.45) * 0.7)
+
+    tr = 0.0045 * P["lean"] * h if moving else 0.0
+    # ---- cape (sab se peeche)
     if garment == "cape":
-        sw = math.sin(t * 3 + ph) * 0.05 * h
-        poly(img, _wob([(sho[0], sho[1]), (sho[0] - f * 0.32 * h + sw, hip[1] + 0.2 * h), (sho[0] - f * 0.08 * h, hip[1] + 0.26 * h)], seed, 1.5), col, BLACK, 3)
+        _draw_cape(img, sho, hip, f, h, col, t, ph, tr)
+    # ---- peeche ke lambe baal
+    if female:
+        _hair_back(img, HL, hr, th, hcol, t, ph, (0.38 if action == "run" else 0.2 if action == "walk" else 0.0), seed)
 
     aBp1, aBp2 = _limb(sho, P["aB"], P["eB"], 0.16 * h, 0.15 * h, f)
     aFp1, aFp2 = _limb(sho, P["aF"], P["eF"], 0.16 * h, 0.15 * h, f)
     lBp1, lBp2 = _limb(hip, P["lB"], -P["kB"], thigh, shin, f)
     lFp1, lFp2 = _limb(hip, P["lF"], -P["kF"], thigh, shin, f)
+    shoe = C(236, 232, 224) if garment == "loincloth" else C(78, 50, 34)
+    sow = max(3.0, th * 0.55)
 
-    def limb_draw(o, p1, p2, hand=False, foot=False):
+    def limb_draw(o, p1, p2, hand=False, foot=False, sleeve=False, back=False):
         line(img, o, p1, th)
         line(img, p1, p2, th)
         circ(img, p1, th * 0.5, BLACK)
+        if sleeve and garment in SLEEVED:
+            sc_ = _shade(col, 0.82) if back else col
+            if garment == "robe":
+                m = (p1[0] + (p2[0] - p1[0]) * 0.55, p1[1] + (p2[1] - p1[1]) * 0.55)
+                _sleeve(img, p1, m, th * 3.3, sc_, sow)
+                _sleeve(img, o, p1, th * 2.8, sc_, sow)
+            else:
+                fr = 0.5 if garment == "tunic" else 0.36
+                _sleeve(img, o, (o[0] + (p1[0] - o[0]) * fr, o[1] + (p1[1] - o[1]) * fr), th * (2.3 if garment == "tunic" else 1.9), sc_, sow)
         if hand:
-            circ(img, p2, th * 0.68, BLACK)
+            circ(img, p2, th * 1.0, WHITE)
+            circ(img, p2, th * 1.0, BLACK, max(2.5, th * 0.45))
         if foot:
-            line(img, p2, (p2[0] + f * 0.08 * h, p2[1]), th)
-            circ(img, (p2[0] + f * 0.08 * h, p2[1]), th * 0.5, BLACK)
+            tip = (p2[0] + f * 0.04 * h, p2[1] - 0.012 * h)
+            ell(img, tip, (0.062 * h, 0.027 * h), 0, 0, 360, shoe)
+            ell(img, tip, (0.062 * h, 0.027 * h), 0, 0, 360, BLACK, sow)
 
-    limb_draw(sho, aBp1, aBp2, hand=True)
+    limb_draw(sho, aBp1, aBp2, hand=True, sleeve=True, back=True)
     limb_draw(hip, lBp1, lBp2, foot=True)
+    limb_draw(hip, lFp1, lFp2, foot=True)
     line(img, hip, sho, th)
     line(img, sho, (hc[0] - math.sin(tilt) * hr * 0.9 * f, hc[1] + math.cos(tilt) * hr * 0.9), th)
-    # garments
-    if garment == "loincloth":
-        _fur_pelt(img, sho, hip, f, h, th, seed)
-    elif garment in ("tunic", "robe", "dress"):
-        hem = hip[1] + (0.07 * h if garment == "tunic" else 0.40 * h)
-        wd = 0.085 * h if garment != "dress" else 0.07 * h
-        hw = (0.14 if garment == "tunic" else 0.20 if garment == "robe" else 0.25) * h
-        cx = hip[0] + f * 0.02 * h
-        pts = [(sho[0] - wd, sho[1]), (sho[0] + wd, sho[1]), (cx + hw, hem), (cx - hw, hem)]
-        wp = _wob(pts, seed, 1.4)
-        poly(img, wp, col, None)
-        shade = tuple(int(c_ * 0.78) for c_ in col)
-        poly(img, [(sho[0] + wd * 0.15, sho[1]), (sho[0] + wd, sho[1]), (cx + hw, hem), (cx + hw * 0.15, hem)], shade, None)
-        hs = tuple(int(c_ * 0.62) for c_ in col)
-        line(img, (cx - hw * 0.96, hem - 0.025 * h), (cx + hw * 0.96, hem - 0.025 * h), max(2, th * 0.5), hs)
-        if garment in ("tunic", "robe"):
-            by = hip[1] - 0.03 * h
-            line(img, (hip[0] - 0.09 * h, by), (hip[0] + 0.09 * h, by), max(3, th * 0.8), COL["wood"])
-        poly(img, wp, None, BLACK, max(2, th * 0.55))
-    limb_draw(hip, lFp1, lFp2, foot=True)
-    # hair back (female long)
-    sway = math.sin(t * 2 + ph) * 0.18 * hr
-    if female:
-        rn = np.random.RandomState(seed + 3)
-        lft, rgt = hc[0] - 1.15 * hr, hc[0] + 1.15 * hr
-        bot_y = hc[1] + 2.5 * hr
-        zz = [(rgt - f * 0.3 * hr + sway - (rgt - lft) * i / 6.0, bot_y + (0.3 * hr if i % 2 else 0) + rn.uniform(-0.12, 0.12) * hr) for i in range(7)]
-        back = [(hc[0] - 1.12 * hr, hc[1] - 0.2 * hr)] + zz[::-1] + [(hc[0] + 1.12 * hr, hc[1] - 0.2 * hr)]
-        poly(img, _wob(back, seed + 1, 1.5), hcol, BLACK, max(2, th * 0.55))
-        poly(img, _blob(hc, hr * 1.1, seed + 2), hcol, BLACK, max(2, th * 0.55))
-    # head
-    head = _blob(hc, hr, seed + 9)
-    poly(img, head, WHITE, None)
-    # hair front
-    kind = "long" if female else ("none" if ch.get("hair", "short") == "bald" else "short")
-    if kind != "none":
-        _draw_hair(img, hc, hr, f, th, kind, hcol, seed, t, ph)
-    poly(img, head, None, BLACK, max(3, th * 0.7))
-    # face
-    fx = hc[0] + f * 0.16 * hr
-    blink = (t + ph) % 3.4 < 0.12
-    ey = hc[1] - 0.06 * hr
-    big_eye = emo in ("surprised", "scared")
-    for sgn in (-1, 1):
-        ex = fx + sgn * 0.36 * hr
-        if blink and not big_eye:
-            line(img, (ex - 0.1 * hr, ey), (ex + 0.1 * hr, ey), max(2, th * 0.4))
-        elif big_eye:
-            circ(img, (ex, ey), 0.2 * hr, WHITE)
-            circ(img, (ex, ey), 0.2 * hr, BLACK, 2)
-            circ(img, (ex + f * 0.06 * hr, ey), 0.08 * hr, BLACK)
-        else:
-            circ(img, (ex + f * 0.03 * hr, ey), 0.095 * hr, BLACK)
-        if female and not big_eye:
-            line(img, (ex + sgn * 0.1 * hr, ey - 0.02 * hr), (ex + sgn * 0.22 * hr, ey - 0.12 * hr), max(2, th * 0.3))
-        by = ey - (0.46 if emo in ("surprised", "scared", "excited") else 0.3) * hr
-        if emo == "curious" and sgn == 1:
-            by -= 0.14 * hr
-        if emo == "angry":
-            line(img, (ex - sgn * 0.2 * hr, by + 0.12 * hr), (ex + sgn * 0.2 * hr, by - 0.08 * hr), max(2, th * 0.45))
-        elif emo in ("sad", "scared"):
-            line(img, (ex - sgn * 0.2 * hr, by - 0.1 * hr), (ex + sgn * 0.2 * hr, by + 0.08 * hr), max(2, th * 0.45))
-        else:
-            line(img, (ex - 0.2 * hr, by), (ex + 0.2 * hr, by - (0.04 * hr if sgn > 0 else 0)), max(2, th * 0.45))
-    my = hc[1] + 0.44 * hr
-    op = mouth
-    wth = max(2, th * 0.45)
-    if op > 0.1:
-        ell(img, (fx, my), (0.2 * hr + 0.08 * hr * op, 0.04 * hr + 0.22 * hr * op), 0, 0, 360, (40, 40, 140))
-        ell(img, (fx, my), (0.2 * hr + 0.08 * hr * op, 0.04 * hr + 0.22 * hr * op), 0, 0, 360, BLACK, wth)
-    elif emo in ("happy", "excited"):
-        ell(img, (fx, my - 0.06 * hr), (0.28 * hr, 0.2 * hr), 0, 15, 165, BLACK, wth)
-    elif emo in ("sad", "scared"):
-        ell(img, (fx, my + 0.12 * hr), (0.22 * hr, 0.14 * hr), 0, 195, 345, BLACK, wth)
-    elif emo == "surprised":
-        circ(img, (fx, my), 0.11 * hr, BLACK, wth)
-    elif emo == "angry":
-        line(img, (fx - 0.2 * hr, my + 0.03 * hr), (fx + 0.2 * hr, my - 0.03 * hr), wth)
-    else:
-        line(img, (fx - 0.15 * hr, my), (fx + 0.15 * hr, my), wth)
-    # accessories
-    if acc == "beard":
-        poly(img, [(hc[0] + hr * 0.95 * math.cos(math.radians(a)), hc[1] + hr * 0.95 * math.sin(math.radians(a))) for a in range(15, 166, 10)] +
-             [(hc[0] + f * 0.05 * hr, hc[1] + 1.55 * hr)], (115, 115, 125), BLACK, 2)
-        line(img, (fx - 0.15 * hr, my), (fx + 0.15 * hr, my), wth)
-    elif acc == "glasses":
+    if garment in ("tunic", "robe", "dress", "loincloth"):
+        _draw_garment(img, garment, col, hip, sho, f, h, th, t, ph, P, seed, moving)
+    elif garment == "cape":
+        _draw_garment(img, "tunic", C(238, 224, 192), hip, sho, f, h, th, t, ph, P, seed, moving)
+
+    # ---- sar
+    circ(img, hc, hr, WHITE)
+    beard = acc == "beard"
+    if beard:
+        ctrl = [HL(-0.95, 0.1), HL(-0.92, 0.7), HL(-0.5, 1.3), HL(0.15, 1.62), HL(0.75, 1.36), HL(1.0, 0.76), HL(1.02, 0.18)]
+        top = [HL(0.72, 0.6), HL(0.2, 0.68), HL(-0.4, 0.56)]
+        bpts = _cr(ctrl, 4) + top
+        poly(img, bpts, hcol if hcol != HAIR_PALETTE[0] else C(70, 66, 70), BLACK, max(3.0, th * 0.55))
+    circ(img, hc, hr, BLACK, max(3.0, th * 0.75))
+    kind_hair = "long" if female else ("none" if ch.get("hair", "short") == "bald" else "short")
+    if kind_hair != "none":
+        _hair_front(img, HL, hr, th, hcol, female, seed % 3, t, ph)
+    else:  # ganje sar par chamak
+        pline(img, [HL(math.cos(math.radians(a)) * 0.78, -math.sin(math.radians(a)) * 0.78) for a in range(138, 96, -8)],
+              max(2, th * 0.45), (225, 225, 230))
+    _face(img, HL, hr, th, emo, female, t, ph, mouth, beard)
+    # ---- accessories
+    if acc == "glasses":
         for sgn in (-1, 1):
-            circ(img, (fx + sgn * 0.36 * hr, ey), 0.27 * hr, BLACK, max(2, th * 0.35))
-        line(img, (fx - 0.1 * hr, ey), (fx + 0.1 * hr, ey), max(2, th * 0.3))
+            circ(img, HL(0.16 + sgn * 0.38, -0.06), 0.31 * hr, BLACK, max(2.5, th * 0.4))
+        pline(img, [HL(0.16 - 0.07, -0.06), HL(0.16 + 0.07, -0.06)], max(2, th * 0.35))
     elif acc == "crown":
         poly(img, [(hc[0] - 0.7 * hr, hc[1] - 0.8 * hr), (hc[0] - 0.8 * hr, hc[1] - 1.55 * hr), (hc[0] - 0.35 * hr, hc[1] - 1.2 * hr),
-                   (hc[0], hc[1] - 1.7 * hr), (hc[0] + 0.35 * hr, hc[1] - 1.2 * hr), (hc[0] + 0.8 * hr, hc[1] - 1.55 * hr), (hc[0] + 0.7 * hr, hc[1] - 0.8 * hr)], COL["gold"], BLACK, 2)
+                   (hc[0], hc[1] - 1.7 * hr), (hc[0] + 0.35 * hr, hc[1] - 1.2 * hr), (hc[0] + 0.8 * hr, hc[1] - 1.55 * hr),
+                   (hc[0] + 0.7 * hr, hc[1] - 0.8 * hr)], COL["gold"], BLACK, max(2.5, th * 0.45))
+        for dx_ in (-0.5, 0.0, 0.5):
+            circ(img, (hc[0] + dx_ * hr, hc[1] - 0.98 * hr), 0.09 * hr, COL["red"])
     elif acc == "hat":
         ell(img, (hc[0], hc[1] - 0.75 * hr), (1.4 * hr, 0.22 * hr), 0, 0, 360, COL["brown"])
         rect(img, hc[0] - 0.7 * hr, hc[1] - 1.55 * hr, hc[0] + 0.7 * hr, hc[1] - 0.78 * hr, COL["brown"], BLACK, 2)
         ell(img, (hc[0], hc[1] - 0.75 * hr), (1.4 * hr, 0.22 * hr), 0, 0, 360, BLACK, 2)
     elif acc == "headband":
-        line(img, (hc[0] - 0.98 * hr, hc[1] - 0.42 * hr), (hc[0] + 0.98 * hr, hc[1] - 0.42 * hr), max(4, th * 0.9), COL["red"])
+        pline(img, _cr([HL(-1.0, -0.40), HL(0.0, -0.58), HL(1.0, -0.40)], 6), max(4, th * 0.9), COL["red"])
+        tail = HL(-1.0, -0.40)
+        pline(img, [tail, (tail[0] - f * 0.35 * hr, tail[1] + 0.25 * hr + 0.1 * hr * math.sin(t * 5))], max(3, th * 0.6), COL["red"])
     elif acc == "helmet":
-        ell(img, (hc[0], hc[1] - 0.15 * hr), (1.12 * hr, 1.1 * hr), 0, 180, 360, COL["stone"])
-        ell(img, (hc[0], hc[1] - 0.15 * hr), (1.12 * hr, 1.1 * hr), 0, 180, 360, BLACK, 3)
-        line(img, (hc[0] - 1.14 * hr, hc[1] - 0.15 * hr), (hc[0] + 1.14 * hr, hc[1] - 0.15 * hr), max(4, th * 0.8))
+        hy = hc[1] - 0.62 * hr
+        ell(img, (hc[0], hy), (1.16 * hr, 0.98 * hr), 0, 180, 360, COL["stone"])
+        ell(img, (hc[0], hy), (1.16 * hr, 0.98 * hr), 0, 180, 360, BLACK, 3)
+        rect(img, hc[0] - 1.2 * hr, hy - 0.07 * hr, hc[0] + 1.2 * hr, hy + 0.1 * hr, _shade(COL["stone"], 0.8), BLACK, 3)
+        poly(img, [(hc[0] - 0.12 * hr, hy - 0.96 * hr), (hc[0], hy - 1.42 * hr), (hc[0] + 0.12 * hr, hy - 0.96 * hr)], COL["red"], BLACK, 2)
     elif acc == "flower":
+        c0 = HL(-0.55, -0.98)
         for i in range(5):
             a = i * 2 * math.pi / 5
-            circ(img, (hc[0] - f * 0.55 * hr + math.cos(a) * 0.2 * hr, hc[1] - 0.95 * hr + math.sin(a) * 0.2 * hr), 0.16 * hr, COL["pink"])
-        circ(img, (hc[0] - f * 0.55 * hr, hc[1] - 0.95 * hr), 0.12 * hr, COL["gold"])
+            circ(img, (c0[0] + math.cos(a) * 0.2 * hr, c0[1] + math.sin(a) * 0.2 * hr), 0.17 * hr, COL["pink"])
+            circ(img, (c0[0] + math.cos(a) * 0.2 * hr, c0[1] + math.sin(a) * 0.2 * hr), 0.17 * hr, BLACK, 2)
+        circ(img, c0, 0.13 * hr, COL["gold"])
     elif acc == "turban":
         ell(img, (hc[0], hc[1] - 0.55 * hr), (1.1 * hr, 0.8 * hr), 0, 180, 360, WHITE)
         ell(img, (hc[0], hc[1] - 0.55 * hr), (1.1 * hr, 0.8 * hr), 0, 180, 360, BLACK, 2)
         circ(img, (hc[0], hc[1] - 0.95 * hr), 0.14 * hr, COL["red"])
-    # front arm
-    limb_draw(sho, aFp1, aFp2, hand=True)
+    # ---- samne ka haath
+    limb_draw(sho, aFp1, aFp2, hand=True, sleeve=True)
+    _fx(img, HL, hc, hr, th, h, f, emo, action, t, ph)
     return hc, hr
 
 
 # ------------------------------------------------------------------ scene
+# zameen par khade props ko character ke size ke hisab se bada karo (warna tree ke saamne insaan giant lagta hai)
+GROUND_MUL = {"tree": 2.6, "hut": 2.2, "door": 2.4, "castle": 2.0, "cave": 2.0, "mountain": 1.4, "animal": 1.8,
+              "crowd": 2.2, "boat": 1.8, "fire": 1.5, "pot": 1.5, "bed": 1.8}
+
+
 def prop_layout(st, props):
     """Har prop ko position do. Zameen wale props neeche, baaqi upar."""
     out = []
@@ -1176,7 +1518,7 @@ class SceneRenderer:
             k = pop_scale(t - 0.2 - 0.2 * n)
             if k <= 0:
                 continue
-            u = base * st.s * k * (1.0 if not st.portrait else 1.0)
+            u = base * st.s * k * (GROUND_MUL.get(name, 1.0) * st.char_h / 640.0 if is_g else 1.0)
             yy = y if is_g else y + 7 * math.sin(t * 2 + n)
             fn(img, x, yy, u, t) if name != "chart" else fn(img, x, yy, u, max(0.0, t - 0.2 - 0.2 * n))
         # characters
@@ -1190,25 +1532,45 @@ class SceneRenderer:
         walking = action in ("walk", "run")
         if two:
             xs = [st.char_x(2, 0), st.char_x(2, 1)]
-            draw_char(st, img, cast[int(oi)], xs[1], 0.93, sc.get("other_action", "idle") if sc.get("other_action", "idle") != "talk" else "idle",
+            oa = sc.get("other_action", "idle")
+            draw_char(st, img, cast[int(oi)], xs[1], 0.76, oa if oa != "talk" else "idle",
                       sc.get("other_emotion", emo if emo in ("surprised", "scared", "happy", "sad", "angry") else "curious"), t, 0.0, -1, 2.1)
-            draw_char(st, img, cast[fi], xs[0], 1.0, action, emo, t, mouth, 1, 0.0)
+            draw_char(st, img, cast[fi], xs[0], 0.82, action, emo, t, mouth, 1, 0.0)
         else:
             f = 1 if (walking or i % 2 == 0) else -1
             draw_char(st, img, cast[fi], st.char_x(1, 0), 1.0, action, emo, t, mouth, f, 0.0)
+            if action == "run":  # speed lines
+                for k in range(7):
+                    ph = (t * 3.0 + k * 0.37) % 1.0
+                    yy = st.ground - st.char_h * (0.12 + 0.8 * ((k * 0.61) % 1.0))
+                    x0 = st.char_x(1, 0) - f * (0.22 * st.W + ph * 0.4 * st.W)
+                    line(img, (x0, yy), (x0 - f * 0.10 * st.W * (1 - ph * 0.5), yy), 3, (96, 96, 96))
+        if action == "celebrate":
+            _confetti(img, st.W, st.H, t, self.seed)
         # label sticker
         lab = (sc.get("label") or "").strip()
         if lab:
             kk = pop_scale(t - 0.35)
-            spr = text_sprite(lab.upper(), 44 if not st.portrait else 40, fill=(20, 20, 20), box=(60, 220, 255), max_w=int(st.W * 0.62))
-            blit(img, spr, st.W / 2, st.H * (0.09 if not st.portrait else 0.1) + 3 * math.sin(t * 2.5), kk)
-        # camera
-        z = 1.0 + (0.05 * ease_out(t / 0.4) * -1 + 0.05) if t < 0.4 else 1.0
+            spr = text_sprite(lab.upper(), 46 if not st.portrait else 46, fill=(20, 20, 20), box=(60, 220, 255), max_w=int(st.W * 0.62))
+            blit(img, spr, st.W / 2, st.H * (0.078 if not st.portrait else 0.1) + 3 * math.sin(t * 2.5), kk)
+        # camera: narm push-in / pull-out + halka haath ka hilna
+        prog = min(t / max(total, 1), 1.0)
+        ez = prog * prog * (3 - 2 * prog)
         kind = i % 4
-        zz = 1.0 + 0.07 * min(t / max(total, 1), 1.0) if kind in (0, 2) else 1.07 - 0.07 * min(t / max(total, 1), 1.0)
-        zoom = zz * (1.0 + 0.06 * (1 - ease_out(t / 0.35)))
-        dxp = (0.012 * st.W * (t / max(total, 1) - 0.5)) * (1 if kind == 2 else -1 if kind == 3 else 0)
+        zz = 1.0 + 0.08 * ez if kind in (0, 2) else 1.08 - 0.08 * ez
+        zoom = zz * (1.0 + 0.07 * (1 - ease_out(t / 0.4)))
+        dxp = 0.02 * st.W * (prog - 0.5) * (1 if kind == 2 else -1 if kind == 3 else 0)
+        dxp += 2.5 * math.sin(t * 0.9 + i)
+        dyp = 2.0 * math.sin(t * 1.3 + i * 2)
         if action == "shock" and t < 0.7:
             dxp += 10 * math.sin(t * 60) * (1 - t / 0.7)
-        M = np.float32([[zoom, 0, st.W / 2 * (1 - zoom) + dxp], [0, zoom, st.H * 0.55 * (1 - zoom)]])
-        return cv2.warpAffine(img, M, (st.W, st.H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        wipe = 0.0
+        if i > 0 and t < 0.2:  # scene badalte waqt tez whip-pan
+            wipe = (1 - t / 0.2) ** 2
+            dxp += st.W * 0.16 * wipe * (1 if i % 2 == 0 else -1)
+        M = np.float32([[zoom, 0, st.W / 2 * (1 - zoom) + dxp], [0, zoom, st.H * 0.55 * (1 - zoom) + dyp]])
+        out = cv2.warpAffine(img, M, (st.W, st.H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        if wipe > 0.05:
+            kx = int(1 + 36 * wipe) | 1
+            out = cv2.blur(out, (kx, 1))
+        return out
