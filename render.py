@@ -12,6 +12,8 @@ import tempfile
 import time
 import zlib
 
+import faulthandler
+
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -20,6 +22,7 @@ import anim
 import music
 import voice
 
+cv2.setNumThreads(1)  # torch (Kokoro) ke saath OpenMP/thread ulajhne se bachne ke liye
 FPS = 30
 FONT = "DejaVu Sans"
 PROFILES = {
@@ -209,9 +212,16 @@ def create_video(kind, data, output_path):
     abs_out = os.path.abspath(output_path)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{p['W']}x{p['H']}",
            "-r", str(FPS), "-i", "-", "-i", audio_path,
-           "-vf", f"scale={p['OW']}:{p['OH']}:flags=lanczos,subtitles=cap.ass",
+           "-vf", f"scale={p['OW']}:{p['OH']}:flags=lanczos,subtitles=cap.ass:fontsdir=/usr/share/fonts/truetype/dejavu",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20" if kind == "short" else "21", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", abs_out]
+    try:  # Kokoro model ka bojh/threads hata do, ab sirf frames banane hain
+        voice._pipe = None
+        import gc
+        gc.collect()
+    except Exception:  # noqa: BLE001
+        pass
+    faulthandler.dump_traceback_later(120, repeat=True)  # kahin atke to log mein dikhe kahan
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, cwd=tmp)
     renderer, cur_i, envs = None, -1, {}
     thumb_done = kind != "long"
@@ -243,11 +253,12 @@ def create_video(kind, data, output_path):
                 proc.stdin.write(frame.tobytes())
             except BrokenPipeError:
                 break
-            if f % 900 == 0:
+            if f % 90 == 0:
                 print(f"[{kind}] frame {f}/{n_frames} ({time.time() - t_start:.0f}s elapsed)", flush=True)
         proc.stdin.close()
     finally:
         rc = proc.wait()
+        faulthandler.cancel_dump_traceback_later()
     if rc != 0:
         sys.exit(f"ERROR: ffmpeg fail hua (code {rc})")
     out_total = duration(abs_out)
