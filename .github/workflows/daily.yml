@@ -73,10 +73,13 @@ jobs:
         run: python script_gen.py
 
       - name: Render video (code-drawn stick-man animation + Kokoro voice + music)
+        timeout-minutes: 12
         env:
           # Koi image API nahi. Music code se banta hai (MUSIC_MODE=download karne par Kevin MacLeod CC-BY track utarta hai)
           MUSIC_MODE: synth
-        run: python render.py
+        run: |
+          fc-cache -f
+          python render.py
 
       - name: Upload to YouTube
         if: env.DO_UPLOAD == 'true'
