@@ -1,12 +1,12 @@
-"""Kokoro voice (male / female - bolne wale character ke gender ke mutabiq); fail ho to edge-tts backup."""
+"""Kokoro voice (male narrator); fail ho to edge-tts backup."""
 import asyncio
 import os
 import re
 import subprocess
 
 
-VOICE = os.environ.get("KOKORO_VOICE", "am_fenrir")  # am_fenrir / am_michael / am_puck / am_adam
-FEMALE_VOICE = os.environ.get("KOKORO_FEMALE_VOICE", "af_heart")  # af_heart / af_bella / af_nicole / af_sarah / af_sky
+VOICE = os.environ.get("KOKORO_VOICE", "am_fenrir")
+FEMALE_VOICE = os.environ.get("KOKORO_FEMALE_VOICE", "af_heart")
 SPEED = float(os.environ.get("KOKORO_SPEED", "1.22"))
 _pipe = None
 
@@ -20,7 +20,6 @@ def _kokoro(text, path, speed, voice):
     if _pipe is None:
         _pipe = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M")
     parts = []
-    # har jumla alag chunk + jumlon ke beech chhota natural saans (punch lines / sawal ke baad thoda zyada)
     sents = [x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x]
     for si, sent in enumerate(sents or [text]):
         for _, _, audio in _pipe(sent, voice=voice, speed=speed, split_pattern=r"\n+"):
@@ -45,12 +44,11 @@ def _edge(text, path, gender="male"):
         backup = "en-US-AndrewNeural"
     try:
         asyncio.run(edge_tts.Communicate(text, voice=voice, rate="+8%", pitch="+0Hz").save(path))
-    except Exception:  # noqa: BLE001  (multilingual voice na mile to purani wali)
+    except Exception:
         asyncio.run(edge_tts.Communicate(text, voice=backup, rate="+8%").save(path))
 
 
 def _tighten(src, dst):
-    """Shuru/beech/aakhir ki lambi khamoshi kaat do, awaaz thodi tez aur zordar karo."""
     af = (
         "silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.02:"
         "stop_periods=-1:stop_duration=0.24:stop_threshold=-42dB:stop_silence=0.11,"
@@ -62,7 +60,6 @@ def _tighten(src, dst):
 
 
 def _fake(text, path, gender="male"):
-    """Sirf local test ke liye (FAKE_VOICE=1): awaaz jaisi shor wali dhun, taake lip-sync/timing test ho sake."""
     import numpy as np
     import wave
 
@@ -71,7 +68,7 @@ def _fake(text, path, gender="male"):
     sr = 44100
     t = np.arange(int(dur * sr)) / sr
     syl = np.clip(np.sin(2 * np.pi * 4.2 * t) * 0.6 + 0.5, 0, 1)
-    f0 = 230 if gender == "female" else 140  # larki ki awaaz ooncha pitch
+    f0 = 230 if gender == "female" else 140
     x = (np.sin(2 * np.pi * f0 * t) + 0.5 * np.sin(2 * np.pi * 2 * f0 * t)) * syl * 0.25
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
@@ -81,7 +78,6 @@ def _fake(text, path, gender="male"):
 
 
 def synth(text, path, speed=None, gender="male"):
-    """gender: render.py hamesha 'male' bhejta hai (ek hi narrator boy). 'female' sirf manually test ke liye bacha hai."""
     female = str(gender).lower() == "female"
     kvoice = FEMALE_VOICE if female else VOICE
     if os.environ.get("FAKE_VOICE") == "1":
@@ -93,7 +89,7 @@ def synth(text, path, speed=None, gender="male"):
             _kokoro(text, raw_wav, speed or SPEED, kvoice)
             src = raw_wav
             break
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"Kokoro failed (attempt {attempt}): {e}")
     if src is None:
         print("Using edge-tts backup")
