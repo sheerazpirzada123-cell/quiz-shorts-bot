@@ -1,9 +1,6 @@
-"""Background music + sound effects, sab code se.
+"""Background music + sound effects, sab code se. 100% original, koi copyright claim nahi.
 
-Default (MUSIC_MODE=synth): music numpy se banta hai -> 100% original, koi copyright claim / Content ID nahi ho sakta,
-koi download nahi, kabhi fail nahi hota.
-MUSIC_MODE=download : Kevin MacLeod (incompetech, CC-BY 4.0) ka track online utarta hai (credit description mein khud lag jata hai);
-                      download fail ho to synth chal jata hai.
+MUSIC_MODE=download (optional): Kevin MacLeod (CC-BY 4.0) track online utarta hai (credit khud laga deta hai).
 """
 import os
 import random
@@ -15,7 +12,7 @@ import numpy as np
 
 SR = 44100
 MODE = os.environ.get("MUSIC_MODE", "synth").strip().lower()
-MUSIC_GAIN = float(os.environ.get("MUSIC_GAIN", "0.20"))   # voice ke muqable music kitna halka ho
+MUSIC_GAIN = float(os.environ.get("MUSIC_GAIN", "0.20"))
 SFX_GAIN = float(os.environ.get("SFX_GAIN", "0.30"))
 
 
@@ -23,7 +20,6 @@ def mtof(m):
     return 440.0 * 2 ** ((m - 69) / 12.0)
 
 
-# ------------------------------------------------------------------ instruments
 def _env_t(n):
     return np.arange(n) / SR
 
@@ -81,8 +77,7 @@ def _add(buf, x, pos, g=1.0):
     buf[pos:e] += x[:e - pos] * g
 
 
-# ------------------------------------------------------------------ synth music
-MOOD = {  # bpm, minor?, progressions (scale degrees), kick, arp style
+MOOD = {
     "quirky": dict(bpm=116, minor=False, progs=[[0, 5, 3, 4], [0, 3, 5, 4], [5, 3, 0, 4]], kick=True, arp="stac", pad=0.5),
     "mysterious": dict(bpm=84, minor=True, progs=[[0, 5, 2, 6], [0, 3, 5, 4], [0, 6, 5, 6]], kick=False, arp="slow", pad=1.0),
     "epic": dict(bpm=100, minor=True, progs=[[0, 5, 2, 6], [0, 2, 6, 4], [5, 6, 0, 0]], kick=True, arp="drive", pad=1.1),
@@ -97,7 +92,7 @@ def synth_music(total_sec, mood="quirky", seed=1):
     pr = random.Random(seed)
     p = MOOD.get(mood, MOOD["quirky"])
     scale = MIN if p["minor"] else MAJ
-    root = pr.choice([48, 50, 52, 53, 55, 57])  # C3..A3
+    root = pr.choice([48, 50, 52, 53, 55, 57])
     beat = 60.0 / p["bpm"]
     bar = beat * 4
     n_bars = int(total_sec / bar) + 3
@@ -114,10 +109,8 @@ def synth_music(total_sec, mood="quirky", seed=1):
         chord = prog[b % 4]
         t0 = b * bar
         tones = [chord, chord + 2, chord + 4, chord + 7]
-        # pad
         for d in tones[:3]:
             _add(buf, pad(mtof(note(d, 1)), bar + 0.9), t0 * SR, 0.20 * p["pad"])
-        # bass
         _add(buf, bass(mtof(note(chord, -1)), beat * 1.8), t0 * SR, 0.55)
         _add(buf, bass(mtof(note(chord + 4, -1)), beat * 1.6), (t0 + 2 * beat) * SR, 0.42)
         if p["arp"] in ("stac", "drive", "soft"):
@@ -129,13 +122,12 @@ def synth_music(total_sec, mood="quirky", seed=1):
                 d = tones[order[i]]
                 _add(buf, pluck(mtof(note(d, 1)), 0.35 if p["arp"] == "stac" else 0.6), (t0 + i * step) * SR,
                      0.26 if p["arp"] != "soft" else 0.22)
-            if sec in (1, 3) and p["arp"] != "soft":  # melody-ish top line
+            if sec in (1, 3) and p["arp"] != "soft":
                 for i, off in enumerate([0, 4, 6]):
                     _add(buf, pluck(mtof(note(tones[(i + b) % 4], 2)), 0.5, 0.6), (t0 + off * step) * SR, 0.17)
-        else:  # slow mysterious plucks
+        else:
             for i, off in enumerate([0, 3, 5]):
                 _add(buf, pluck(mtof(note(tones[(i + b) % 4], 2)), 1.1, 0.5), (t0 + off * beat * 0.75) * SR, 0.2)
-        # drums
         if p["kick"]:
             for q in (0, 2):
                 _add(buf, kick(), (t0 + q * beat) * SR, 0.55)
@@ -149,7 +141,6 @@ def synth_music(total_sec, mood="quirky", seed=1):
         else:
             for i in range(8):
                 _add(buf, hat(rnd), (t0 + i * beat / 2) * SR, 0.10)
-    # chhota reverb/echo
     for d, g in ((0.23, 0.28), (0.41, 0.17), (0.67, 0.10)):
         k = int(d * SR)
         buf[k:] += buf[:-k] * g
@@ -162,8 +153,7 @@ def synth_music(total_sec, mood="quirky", seed=1):
     return out.astype(np.float32)
 
 
-# ------------------------------------------------------------------ optional download
-KM_TRACKS = [  # Kevin MacLeod, incompetech.com, CC-BY 4.0
+KM_TRACKS = [
     "Sneaky Snitch", "Fluffing a Duck", "Carefree", "Monkeys Spinning Monkeys", "Investigations", "Wallpaper",
     "Local Forecast - Elevator", "Pamgaea",
 ]
@@ -197,12 +187,11 @@ def download_music(total_sec, seed):
             credit = (f'Music: "{name}" Kevin MacLeod (incompetech.com) Licensed under Creative Commons: By Attribution 4.0 '
                       f"License http://creativecommons.org/licenses/by/4.0/")
             return x.astype(np.float32), credit
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"music download failed ({name}): {str(e)[:120]}")
     return None, ""
 
 
-# ------------------------------------------------------------------ sfx
 def sfx_bank(seed=3):
     rnd = np.random.RandomState(seed)
     bank = {}
@@ -229,7 +218,6 @@ def sfx_bank(seed=3):
     return bank
 
 
-# ------------------------------------------------------------------ wav io
 def read_wav(path):
     with wave.open(path, "rb") as w:
         ch, sw, sr, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
@@ -242,7 +230,7 @@ def read_wav(path):
         x = (np.frombuffer(raw, np.uint8).astype(np.float32) - 128) / 128.0
     if ch > 1:
         x = x.reshape(-1, ch).mean(axis=1)
-    if sr != SR:  # sirf sanity: ffmpeg se 44100 hi aata hai
+    if sr != SR:
         idx = np.linspace(0, len(x) - 1, int(len(x) * SR / sr))
         x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
     return x
@@ -257,9 +245,7 @@ def write_wav(path, x):
         w.writeframes(y.tobytes())
 
 
-# ------------------------------------------------------------------ final mix
 def mix(voice, total_sec, mood, seed, sfx_events):
-    """voice: float32 mono (total_sec lambi). sfx_events: [(time_sec, name, gain)]. Returns (mix, credit)."""
     n = int(total_sec * SR)
     voice = np.pad(voice, (0, max(0, n - len(voice))))[:n]
     music, credit = (None, "")
@@ -267,7 +253,6 @@ def mix(voice, total_sec, mood, seed, sfx_events):
         music, credit = download_music(total_sec, seed)
     if music is None:
         music = synth_music(total_sec, mood, seed)
-    # music ko awaaz ke neeche dabao (ducking)
     hop = int(0.02 * SR)
     frames = np.abs(voice[: (n // hop) * hop]).reshape(-1, hop).max(axis=1)
     act = np.clip(frames / 0.05, 0, 1)
