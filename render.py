@@ -174,7 +174,9 @@ def create_video(kind, data, output_path):
     for i, sc in enumerate(scenes):
         print(f"[{kind}] voice {i + 1}/{len(scenes)}: {sc['narration']}", flush=True)
         wp = os.path.join(tmp, f"a{i}.wav")
-        voice.synth(sc["narration"], wp, speed)
+        fi_v = min(max(int(sc.get("focus", 0) or 0), 0), len(cast) - 1)
+        gender = cast[fi_v].get("gender", "male")  # jo character bol raha hai, usi ki awaaz (larki -> female voice)
+        voice.synth(sc["narration"], wp, speed, gender)
         x = music.read_wav(wp)
         wavs.append(x)
         speech_dur.append(len(x) / music.SR)
