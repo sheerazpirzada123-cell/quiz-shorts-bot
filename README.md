@@ -11,6 +11,11 @@ aur YouTube par upload karta hai. **Koi image API / koi extra key nahi** - sab k
 - **Music + sound effects (music.py)**: bg music code se banta hai (4 moods: quirky / mysterious / epic / chill), awaaz ke neeche
   khud dab jata hai. Whoosh/pop/ding/thud effects har scene par. 100% original => copyright claim ka masla hi nahi.
   `MUSIC_MODE=download` karein to Kevin MacLeod (CC-BY) ka track online utarta hai aur credit description mein khud laga deta hai.
+- **Narrator (v2)**: poori video mein **ek hi narrator boy** (male Kokoro voice). Characters (larki ho ya larka) sirf screen par act karte hain,
+  apni awaaz mein nahi bolte. Script bhi ek hi witty narrator ki awaaz mein likhi jati hai.
+- **Viral engine (v2)**: Gemini 10 story pitches banata hai (hook + twist + scores), code best + sabse pakki sachchi chunta hai, Google Search se
+  fact-check hota hai (jhooti nikli to agli pitch). Phir likhai, phir "script doctor" pass (Short poora, long ka hook chapter) jo jokes/punch tez karta hai.
+  `GEMINI_THINK` (default 1024) se writing ke liye Gemini ka sochne ka budget badha sakte hain. Fallback script ab history mein save nahi hoti.
 - **Story (script_gen.py)**: pehle Google Search se research, phir plan (topic, title, cast, 10 chapters), phir har chapter alag
   likha jata hai -> lambi video (~9-10 min) aur har chapter ke end par cliffhanger. Obscure topics, hook, suspense, mazah.
 - Long video default ~9 min (`LONG_TARGET_WORDS` = 1500). Poore 10 min ke liye 1700 kar dein (workflow ke `env:` mein).
