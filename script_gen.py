@@ -400,8 +400,10 @@ STANDALONE RULES:
 {brief}
 
 COMMON RULES:
-- Total narration 100-125 words (about 40-45 seconds spoken). 11 to 14 scenes, each scene ONE short punchy sentence (6-13 words).
-- Scene 1 is the HOOK, max 14 words: a shocking claim, a myth-flip or a curiosity gap that makes people unable to swipe away. No greetings, no intro.
+- Total narration 90-110 words (about 35-42 seconds spoken, NEVER longer: shorter Shorts get watched to the end). 11 to 13 scenes, each scene ONE short punchy sentence (5-11 words).
+- Scene 1 is the HOOK, max 12 words: a shocking claim, a myth-flip or a curiosity gap that makes people unable to swipe away in the first 2 seconds. Start with the most surprising fact, not with background. No greetings, no intro.
+- RETENTION: by scene 3 promise a payoff ("and the reason is insane"); around the middle re-hook with a twist or "but it gets worse"; reveal the payoff only in the last third. Every sentence must add NEW information, no filler.
+- Write like a real person talking: contractions (it's, they'd), occasional "okay", "wait", "honestly", one funny comparison. No dictionary-style sentences.
 - Teenager-friendly, conversational, high-energy spoken English. Short sentences, vary rhythm, one funny detail, occasional exclamation or question. No clichés ("did you know", "let's dive in").
 - {CAST_RULES}
 - {SCENE_RULES}
@@ -413,8 +415,8 @@ COMMON RULES:
         d["scenes"] = [clean_scene(s, len(d["characters"])) for s in d["scenes"]]
         n = len(d["scenes"])
         words = sum(len(s["narration"].split()) for s in d["scenes"])
-        assert (9 if teaser else 8) <= n <= 17, f"scene count {n}"
-        assert 70 <= words <= 165, f"word count {words}"
+        assert (9 if teaser else 8) <= n <= 16, f"scene count {n}"
+        assert 70 <= words <= 135, f"word count {words}"
         if teaser:
             d["topic"], d["characters"] = long["topic"], long["characters"]
             d["teaser"] = True
