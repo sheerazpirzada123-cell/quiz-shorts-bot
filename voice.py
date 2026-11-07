@@ -23,13 +23,17 @@ def _kokoro(text, path, speed):
             parts.append(audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio))
     if not parts:
         raise RuntimeError("kokoro returned no audio")
-    sf.write(path, np.concatenate(parts), 24000)
+    sf.write(path, np.concatenate(parts), 24000, format="WAV", subtype="PCM_16")
 
 
 def _edge(text, path):
     import edge_tts
 
-    asyncio.run(edge_tts.Communicate(text, voice="en-US-AndrewNeural", rate="+8%").save(path))
+    voice = os.environ.get("EDGE_VOICE", "en-US-AndrewMultilingualNeural")
+    try:
+        asyncio.run(edge_tts.Communicate(text, voice=voice, rate="+8%", pitch="+0Hz").save(path))
+    except Exception:  # noqa: BLE001  (multilingual voice na mile to purani wali)
+        asyncio.run(edge_tts.Communicate(text, voice="en-US-AndrewNeural", rate="+8%").save(path))
 
 
 def _tighten(src, dst):
@@ -64,11 +68,20 @@ def _fake(text, path):
 def synth(text, path, speed=None):
     if os.environ.get("FAKE_VOICE") == "1":
         return _fake(text, path)
-    raw = path + ".raw"
-    try:
-        _kokoro(text, raw, speed or SPEED)
-    except Exception as e:  # noqa: BLE001
-        print(f"Kokoro failed ({e}); using edge-tts backup")
-        _edge(text, raw)
-    _tighten(raw, path)
-    os.remove(raw)
+    raw_wav, raw_mp3 = path + ".k.wav", path + ".e.mp3"
+    src = None
+    for attempt in (1, 2):
+        try:
+            _kokoro(text, raw_wav, speed or SPEED)
+            src = raw_wav
+            break
+        except Exception as e:  # noqa: BLE001
+            print(f"Kokoro failed (attempt {attempt}): {e}")
+    if src is None:
+        print("Using edge-tts backup")
+        _edge(text, raw_mp3)
+        src = raw_mp3
+    _tighten(src, path)
+    for f in (raw_wav, raw_mp3):
+        if os.path.exists(f):
+            os.remove(f)
