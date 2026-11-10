@@ -26,6 +26,11 @@ FPS = 30
 W, H = 1080, 1920
 SW, SH = W // 4, H // 4
 SHOT = {"wide": 0.33, "medium": 0.48, "close": 1.06}     # character ki height / frame
+NARRATOR = os.environ.get("NARRATOR_AVATAR", "1") != "0"        # 0 = narrator ka chehra na dikhao
+NARR_CH = dict(name="Narrator", shirt="teal", hat="none", hat_color="red", hair_color="black", overalls=False, tie=False,
+               glasses=True, mustache=False)
+NB_C, NB_R, NB_H = (170, 1610), 120, 600                  # narrator badge: centre, radius, qad
+VIEWS = [0.0, -0.5, 0.5, -0.25, 0.25]                      # same jagah ke scenes mein bg ka alag hissa
 CLOSE_GK = 0.36                                           # close: head-centre y / frame
 PERSP = 1.25                                              # char height ~ (feet_y - horizon) * PERSP
 TONE = {
@@ -232,12 +237,33 @@ def post(frame, vig, grain, f, add_small, lut, flash=0.0):
     return cv2.LUT(np.clip(out, 0, 255).astype(np.uint8), lut)
 
 
-def pick_speaker(cast):
-    return min(range(len(cast)), key=lambda k: (PRIO.get(cast[k]["action"], 7), k))
+def narrator_badge(frame, tg, mouth, vis):
+    """Sirf narrator lipsync karta hai: gol badge mein, awaaz ke saath."""
+    cx, cy = NB_C
+    R = NB_R
+    xa, ya, xb, yb = cx - R - 8, cy - R - 8, cx + R + 8, cy + R + 8
+    yy, xx = np.mgrid[ya:yb, xa:xb].astype(np.float32)
+    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    inside = np.clip(R - dist, 0, 1)[..., None]
+    ring = (np.clip(R + 6 - dist, 0, 1) - np.clip(R - dist, 0, 1))[..., None]
+    reg = frame[ya:yb, xa:xb].astype(np.float32)
+    reg = reg * (1 - inside) + np.array((52, 62, 92), np.float32) * inside
+    reg = reg * (1 - ring) + 255.0 * ring
+    frame[ya:yb, xa:xb] = reg.astype(np.uint8)
+    r = rick.render_char(W, H, cx, cy + 0.775 * NB_H, NB_H, NARR_CH, "talk", "neutral", tg + 5.0, mouth, 1, 2.0, 3.3, vis=vis, talk=1.0, look=0.3)
+    if r is None:
+        return
+    rgb, a, x0, y0 = r
+    h, w = a.shape
+    yy, xx = np.mgrid[y0:y0 + h, x0:x0 + w].astype(np.float32)
+    a = a * np.clip(R - np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2), 0, 1)
+    reg = frame[y0:y0 + h, x0:x0 + w].astype(np.float32)
+    frame[y0:y0 + h, x0:x0 + w] = (reg * (1 - a[..., None]) + rgb * a[..., None]).astype(np.uint8)
 
 
 class Renderer:
-    def __init__(self, data, info, bgs, metas, seed):
+    def __init__(self, data, info, bgs, metas, seed, views=None):
+        self.views = views or [0.0] * len(bgs)
         self.chars, self.scenes, self.info, self.bgs, self.metas, self.seed = data["characters"], data["scenes"], info, bgs, metas, seed
         self.starts = [x["start"] for x in info]
         self.vig = make_vignette()
@@ -262,12 +288,16 @@ class Renderer:
         T = TONE[tone]
         ls = meta["ls"]
         z, px, py = camera(sc.get("camera", "push_in"), lt, nf["hold"], i)
+        px = max(-1.2, min(1.2, px + self.views[i]))
         frame, sdx, sdy = bg_frame(self.bgs[i], px, py, lt, i)
         # ---- characters: bg ki zameen par, perspective size ke saath
         shot = sc.get("shot", "medium")
         cast = sc["cast"][:1] if shot == "close" else sc["cast"]
         n = len(cast)
-        spk = pick_speaker(cast)
+        pc = {}                                              # pichhle scene ke wahi characters (same jagah) => teleport/re-entry nahi
+        if (i > 0 and sc.get("location") is not None and self.scenes[i - 1].get("location") == sc.get("location")
+                and shot != "close" and self.scenes[i - 1].get("shot") != "close"):
+            pc = {p["who"]: p for p in self.scenes[i - 1]["cast"]}
         ei = int((lt - nf["env_off"]) * FPS)
         speaking = 0 <= ei < len(nf["env"])
         mouth = float(nf["env"][ei]) if speaking else 0.0
@@ -290,15 +320,19 @@ class Renderer:
             act = c["action"]
             d = 1 if c.get("facing", 1) >= 0 else -1
             Hk = Hc * sc_k
+            p0 = pc.get(c["who"])
+            cont = p0 is not None
+            cxn = p0["x"] + (c["x"] - p0["x"]) * ease(lt / 0.5) if cont else c["x"]
+            tt = (tg + 5.0 + k * 0.4) if (cont and p0["action"] == act) else (lt + k * 0.4)
             if shot == "close":
                 fx = W * (0.5 + (c["x"] - 0.5) * 0.4) + sdx
             else:
-                fx = c["x"] * W + sdx
+                fx = cxn * W + sdx
                 sp = rick.walk_speed(act)
                 if sp > 0:                                 # walk/run: asli movement (feet slide nahi)
                     fx += d * sp * Hk * (lt - nf["hold"] / 2)
                 fx = min(0.92 * W, max(0.08 * W, fx))
-            enter = (lt - 0.06 * k) / 0.32
+            enter = 2.0 if cont else (lt - 0.06 * k) / 0.32
             Hs = Hk * (0.92 + 0.08 * rick.back(enter)) if enter < 1 else Hk
             zi = min(2, int(min(0.999, max(0.0, fx / W)) * 3))
             zc = np.array(meta["zones"][zi], np.float32)
@@ -307,9 +341,9 @@ class Renderer:
             amb = tuple(float(v) for v in np.array(T["amb"], np.float32) * (0.62 + 0.38 * zn) * expo)
             if shot != "close":
                 cast_shadow(frame, fx, fyk, Hs, ls, T["shadow"])
-            r = rick.render_char(W, H, fx, fyk, Hs, ch, act, c["emotion"], lt + k * 0.4, mouth if k == spk else 0.0, d, enter,
-                                 self.seed % 7 + k * 1.3, amb, tuple(v * 0.10 for v in T["rim"]), ls, vis if k == spk else 0,
-                                 1.0 if (speaking and k == spk) else 0.0, 1.0 if n > 1 else 0.3, T["key"], T["bounce"])
+            r = rick.render_char(W, H, fx, fyk, Hs, ch, act, c["emotion"], tt, 0.0, d, enter,
+                                 self.seed % 7 + k * 1.3, amb, tuple(v * 0.10 for v in T["rim"]), ls, 0,
+                                 1.0 if act == "talk" else 0.0, 1.0 if n > 1 else 0.3, T["key"], T["bounce"])
             if r is None:
                 continue
             rgb, a, x0, y0 = r
@@ -320,16 +354,18 @@ class Renderer:
         # ---- camera zoom + shake + scene-start punch
         shk = 0.0
         if sc.get("sfx") in SFX_AT and 0 <= lt - 0.3 < 0.35:
-            shk = 14 * math.exp(-(lt - 0.3) * 9)
+            shk = 7 * math.exp(-(lt - 0.3) * 9)
         cz = 1.0 + (z - 1.0) * 0.8
         flash = 0.0
         if i > 0 and lt < 0.22:
             q = lt / 0.22
-            cz *= 1.0 + 0.07 * (1 - ease(q))
-            flash = 20.0 * (1 - q) ** 2
+            cz *= 1.0 + 0.035 * (1 - ease(q))
+            flash = 10.0 * (1 - q) ** 2
         frame = warp(frame, cz, shk * math.sin(lt * 90), shk * math.cos(lt * 77))
         lg = self.light(i, tone, ls).layer(lt, tg, 0.93 + 0.07 * math.sin(tg * 9.0 + i) if tone == "indoor" else 1.0)
         frame = post(frame, self.vig, self.grain, f, lg, self.luts[tone], flash)
+        if NARRATOR:
+            narrator_badge(frame, tg, mouth, vis)
         # ---- captions
         seen = [w for w, a_, b_ in nf["words"] if a_ <= lt]
         if seen:
@@ -351,12 +387,18 @@ def create(data, out_path):
     seed = zlib.crc32(data.get("topic", "x").encode()) % 100000
     vox, info, total = voice.build(scenes, tmp, FPS)
     # ---- backgrounds
-    bgs, metas = [], []
+    # har LOCATION ka bg sirf ek baar banta hai; us jagah ke saare scenes wahi bg (alag hissa) use karte hain => din/raat/jagah consistent
+    bgs, metas, views, made, seen = [], [], [], {}, {}
+    has_locs = bool(data.get("locations"))
     for i, sc in enumerate(scenes):
-        print(f"[bg] {i + 1}/{len(scenes)}: {sc['bg_prompt'][:60]}", flush=True)
-        b, m = bgimg.get_bg(sc["bg_prompt"], sc.get("tone", "day"), seed + i * 31)
-        bgs.append(b)
-        metas.append(m)
+        key = sc.get("location", 0) if has_locs else i
+        if key not in made:
+            print(f"[bg] location {key} ({len(made) + 1}): {sc['bg_prompt'][:60]}", flush=True)
+            made[key] = bgimg.get_bg(sc["bg_prompt"], sc.get("tone", "day"), seed + key * 31)
+        bgs.append(made[key][0])
+        metas.append(made[key][1])
+        views.append(VIEWS[seen.get(key, 0) % len(VIEWS)] if has_locs else 0.0)
+        seen[key] = seen.get(key, 0) + 1
     # ---- audio mix (voice + soft music + sfx)
     v44 = np.interp(np.linspace(0, len(vox), int(len(vox) * music.SR / voice.SR), endpoint=False), np.arange(len(vox)), vox).astype(np.float32)
     ev = []
@@ -371,7 +413,7 @@ def create(data, out_path):
     music.write_wav(audio_path, mixed)
     print(f"[render] audio ok ({total:.1f}s, {len(ev)} sfx)", flush=True)
 
-    R = Renderer(data, info, bgs, metas, seed)
+    R = Renderer(data, info, bgs, metas, seed, views)
     n_frames = int(round(total * FPS))
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
            "-i", audio_path, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac",
