@@ -1,4 +1,4 @@
-name: Daily Relatable Short
+name: Daily Story Short
 
 on:
   schedule:
@@ -14,14 +14,20 @@ on:
 permissions:
   contents: write
 
+concurrency:                 # do runs ek saath na chalein (history.json push conflict se bachne ke liye)
+  group: shorts-bot
+  cancel-in-progress: false
+
 env:
-  MAX_DELAY_MIN: "240"
+  # Pehle 240 min tak sleep hota tha = har run ke runner minutes zaya (private repo par 2000 free min/month hi hote hain).
+  # GitHub cron khud bhi kuch minute late hota hai, isliye 15 min ka jitter kaafi hai.
+  MAX_DELAY_MIN: "15"
   DO_UPLOAD: ${{ (github.event_name == 'workflow_dispatch' && inputs.upload == false) && 'false' || 'true' }}
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 60
     steps:
       - name: Random wait (sirf scheduled run par)
         if: github.event_name == 'schedule'
@@ -31,6 +37,18 @@ jobs:
           sleep "$DELAY"
 
       - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: |
+          [ -n "$GEMINI_API_KEY" ] || { echo "::error::GEMINI_API_KEY secret missing"; exit 1; }
+          if [ "$DO_UPLOAD" = "true" ]; then
+            [ -n "$YT_ID" ] && [ -n "$YT_SECRET" ] && [ -n "$YT_REFRESH" ] || { echo "::error::YouTube secret(s) missing"; exit 1; }
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -58,7 +76,7 @@ jobs:
         run: python story_gen.py
 
       - name: Render video
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           MUSIC_MODE: synth
         run: |
