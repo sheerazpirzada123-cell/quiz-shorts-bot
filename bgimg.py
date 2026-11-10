@@ -14,7 +14,13 @@ STYLE = ("stylized 3D render, Unreal Engine 5 look, vibrant saturated colors, so
 CACHE = "bgcache"
 
 
-def fetch(prompt, seed, tries=4):
+_fails = 0
+
+
+def fetch(prompt, seed, tries=2):
+    global _fails
+    if _fails >= 2:      # Pollinations down hai -> baaqi scenes mein waqt zaya nahi
+        return None
     if os.environ.get("BG_OFFLINE"):
         return None
     os.makedirs(CACHE, exist_ok=True)
@@ -27,15 +33,17 @@ def fetch(prompt, seed, tries=4):
         url = (f"https://image.pollinations.ai/prompt/{q}?width=768&height=1344&seed={seed + k * 17}"
                f"&model=flux&nologo=true&enhance=false")
         try:
-            r = requests.get(url, timeout=120)
+            r = requests.get(url, timeout=60)
             if r.status_code == 200 and len(r.content) > 20000:
                 img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
                 if img is not None and img.shape[0] > 400:
                     cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    _fails = 0
                     return img
         except Exception as e:
             print("  bg fetch err:", str(e)[:80])
-        time.sleep(6 + 6 * k)
+        time.sleep(3)
+    _fails += 1
     return None
 
 
