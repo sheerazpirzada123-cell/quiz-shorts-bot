@@ -1,0 +1,10 @@
+requests
+Pillow
+numpy
+opencv-python-headless
+soundfile
+kokoro>=0.9.4
+edge-tts
+google-api-python-client
+google-auth
+google-auth-httplib2
