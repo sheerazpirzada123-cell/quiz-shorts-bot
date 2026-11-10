@@ -1,6 +1,6 @@
 """script.json -> output.mp4 (Short 1080x1920, 30fps): 3D-style backgrounds + stick-man actors + voice-over + captions.
-v2: characters bg ki zameen/perspective par khade hote hain (size match), scene ki light/rang unpar padta hai,
-cast shadow, god-rays + dust, cinematic grade, speaker ka asli lipsync, walk/run mein asli movement, scene transitions."""
+v3: narrator ka chehra/badge nahi (sirf awaaz), characters kabhi lipsync nahi karte (sirf acting), real-photo bg ke saath
+perspective match, public jagah par pichhe hamare jaise stick-man log, close shot mein bg defocus, haze + softness match."""
 import bisect
 import faulthandler
 import json
@@ -26,10 +26,6 @@ FPS = 30
 W, H = 1080, 1920
 SW, SH = W // 4, H // 4
 SHOT = {"wide": 0.33, "medium": 0.48, "close": 1.06}     # character ki height / frame
-NARRATOR = os.environ.get("NARRATOR_AVATAR", "1") != "0"        # 0 = narrator ka chehra na dikhao
-NARR_CH = dict(name="Narrator", shirt="teal", hat="none", hat_color="red", hair_color="black", overalls=False, tie=False,
-               glasses=True, mustache=False)
-NB_C, NB_R, NB_H = (170, 1610), 120, 600                  # narrator badge: centre, radius, qad
 VIEWS = [0.0, -0.5, 0.5, -0.25, 0.25]                      # same jagah ke scenes mein bg ka alag hissa
 CLOSE_GK = 0.36                                           # close: head-centre y / frame
 PERSP = 1.25                                              # char height ~ (feet_y - horizon) * PERSP
@@ -43,6 +39,14 @@ TONE = {
     "indoor": dict(amb=(1.0, 0.95, 0.88), rim=(1.0, 0.85, 0.6), key=(1.1, 1.0, 0.85), bounce=(0.6, 0.45, 0.3),
                    shadow=(0.50, 0.45, 0.52), ray=(255, 216, 150), rays=0.45, lut=((0.01, 0.0, 0.01), (0.04, 0.02, -0.03))),
 }
+PUBLIC_WORDS = ("street", "park", "plaza", "market", "station", "city", "town", "square", "beach", "stadium", "mall", "school",
+                "road", "playground", "fair", "crossing", "sidewalk", "highway", "airport", "bazaar", "festival", "arena",
+                "campus", "cafe", "downtown", "pier", "boardwalk", "amusement", "crowd", "village", "port", "harbor")
+PRIVATE_WORDS = ("workshop", "lab", "office", "garage", "bedroom", "kitchen", "drafting", "basement", "studio", "cabin")
+CROWD_N = 7
+X_SHIRTS = ["yellow", "red", "blue", "green", "orange", "purple", "teal", "pink", "gray", "white", "brown", "navy"]
+X_HATS = ["none", "none", "cap", "beanie", "slick", "messy", "none"]
+X_HAIRS = ["black", "brown", "blonde", "red", "gray"]
 SFX_AT = {"gasp": 0.2, "thud": 0.1, "punch": 0.1, "bonk": 0.1, "fail": 0.3}
 PRIO = {"talk": 0, "point": 1, "angry": 2, "laugh": 3, "celebrate": 3, "shock": 3, "wave": 3, "shrug": 4, "think": 5,
         "hold": 5, "sad": 5, "facepalm": 6, "idle": 7, "walk": 8, "run": 8}
@@ -237,30 +241,6 @@ def post(frame, vig, grain, f, add_small, lut, flash=0.0):
     return cv2.LUT(np.clip(out, 0, 255).astype(np.uint8), lut)
 
 
-def narrator_badge(frame, tg, mouth, vis):
-    """Sirf narrator lipsync karta hai: gol badge mein, awaaz ke saath."""
-    cx, cy = NB_C
-    R = NB_R
-    xa, ya, xb, yb = cx - R - 8, cy - R - 8, cx + R + 8, cy + R + 8
-    yy, xx = np.mgrid[ya:yb, xa:xb].astype(np.float32)
-    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
-    inside = np.clip(R - dist, 0, 1)[..., None]
-    ring = (np.clip(R + 6 - dist, 0, 1) - np.clip(R - dist, 0, 1))[..., None]
-    reg = frame[ya:yb, xa:xb].astype(np.float32)
-    reg = reg * (1 - inside) + np.array((52, 62, 92), np.float32) * inside
-    reg = reg * (1 - ring) + 255.0 * ring
-    frame[ya:yb, xa:xb] = reg.astype(np.uint8)
-    r = rick.render_char(W, H, cx, cy + 0.775 * NB_H, NB_H, NARR_CH, "talk", "neutral", tg + 5.0, mouth, 1, 2.0, 3.3, vis=vis, talk=1.0, look=0.3)
-    if r is None:
-        return
-    rgb, a, x0, y0 = r
-    h, w = a.shape
-    yy, xx = np.mgrid[y0:y0 + h, x0:x0 + w].astype(np.float32)
-    a = a * np.clip(R - np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2), 0, 1)
-    reg = frame[y0:y0 + h, x0:x0 + w].astype(np.float32)
-    frame[y0:y0 + h, x0:x0 + w] = (reg * (1 - a[..., None]) + rgb * a[..., None]).astype(np.uint8)
-
-
 class Renderer:
     def __init__(self, data, info, bgs, metas, seed, views=None):
         self.views = views or [0.0] * len(bgs)
@@ -271,6 +251,64 @@ class Renderer:
         self.grain = [(rng.randn(H, W, 1).astype(np.float32) * 1.3) for _ in range(5)]
         self.luts = {t: make_lut(t) for t in TONE}
         self.lights = {}
+        self.locs = data.get("locations") or []
+        self.crowds, self.blurs = {}, {}
+
+    def crowd(self, li):
+        """Public jagah (street/park/market...) ke pichhe ke log: hamare hi jaise stick-man, location ke hisaab se fix."""
+        if li in self.crowds:
+            return self.crowds[li]
+        loc = self.locs[li] if 0 <= li < len(self.locs) else {}
+        txt = (str(loc.get("name", "")) + " " + str(loc.get("bg_prompt", ""))).lower()
+        ppl = []
+        if any(w in txt for w in PUBLIC_WORDS) and not any(w in txt for w in PRIVATE_WORDS):
+            r = np.random.RandomState(self.seed * 13 + li * 101 + 7)
+            for k in range(CROWD_N):
+                ch = dict(name=f"x{li}_{k}", shirt=X_SHIRTS[r.randint(len(X_SHIRTS))], hat=X_HATS[r.randint(len(X_HATS))],
+                          hat_color=X_SHIRTS[r.randint(len(X_SHIRTS))], hair_color=X_HAIRS[r.randint(len(X_HAIRS))],
+                          overalls=bool(r.rand() < 0.15), tie=bool(r.rand() < 0.10), glasses=bool(r.rand() < 0.2),
+                          mustache=bool(r.rand() < 0.12))
+                ppl.append(dict(x=float(r.rand()), depth=(k + float(r.rand())) / CROWD_N, ch=ch, k=k,
+                                act="walk" if r.rand() < 0.5 else "idle", d=1 if r.rand() < 0.5 else -1, ph=float(r.rand() * 10)))
+        self.crowds[li] = ppl
+        return ppl
+
+    def bg_for(self, i, shot):
+        """Close shot mein bg defocus (depth of field): character alag ubhar kar aata hai."""
+        bg = self.bgs[i]
+        if shot != "close":
+            return bg
+        key = id(bg)
+        if key not in self.blurs:
+            self.blurs = {key: cv2.GaussianBlur(bg, (0, 0), 7)}
+        return self.blurs[key]
+
+    def put(self, frame, ch, act, emo, tt, fx, fy, Hs, d, enter, seed, T, meta, ls, multi, talk=0.0, haze=0.0, soft=0.7, alpha=1.0):
+        """Ek character ko bg par rakhta hai: zameen ke rang/roshni se light match, haze (door wale), softness match."""
+        zi = min(2, int(min(0.999, max(0.0, fx / W)) * 3))
+        zc = np.array(meta["zones"][zi], np.float32)
+        zn = np.clip(zc / (zc.mean() + 1e-6), 0.8, 1.2)
+        expo = float(np.clip(0.80 + 0.45 * zc.mean() / 255.0, 0.85, 1.08))
+        amb = tuple(float(v) for v in np.array(T["amb"], np.float32) * (0.62 + 0.38 * zn) * expo)
+        r = rick.render_char(W, H, fx, fy, Hs, ch, act, emo, tt, 0.0, d, enter, seed, amb,
+                             tuple(v * 0.10 for v in T["rim"]), ls, 0, talk, multi, T["key"], T["bounce"])
+        if r is None:
+            return
+        rgb, a, x0, y0 = r
+        if haze > 0:                                          # door ke log bg ke rang mein thode ghul jaate hain
+            hc = np.array(zc, np.float32) * 0.5 + 0.5 * 215.0
+            rgb = rgb * (1 - haze) + hc[None, None, :] * haze
+        if soft > 0:                                          # photo-bg ke saath match: halki naramee
+            rgb = cv2.GaussianBlur(rgb, (0, 0), soft)
+            a = cv2.GaussianBlur(a, (0, 0), soft)
+        a = a * alpha
+        h, w = a.shape
+        ya, yb, xa, xb = max(0, y0), min(H, y0 + h), max(0, x0), min(W, x0 + w)
+        if yb <= ya or xb <= xa:
+            return
+        a, rgb = a[ya - y0:yb - y0, xa - x0:xb - x0], rgb[ya - y0:yb - y0, xa - x0:xb - x0]
+        reg = frame[ya:yb, xa:xb].astype(np.float32)
+        frame[ya:yb, xa:xb] = (reg * (1 - a[..., None]) + rgb * a[..., None]).astype(np.uint8)
 
     def light(self, i, tone, ls):
         if i not in self.lights:
@@ -289,7 +327,7 @@ class Renderer:
         ls = meta["ls"]
         z, px, py = camera(sc.get("camera", "push_in"), lt, nf["hold"], i)
         px = max(-1.2, min(1.2, px + self.views[i]))
-        frame, sdx, sdy = bg_frame(self.bgs[i], px, py, lt, i)
+        frame, sdx, sdy = bg_frame(self.bg_for(i, sc.get("shot", "medium")), px, py, lt, i)
         # ---- characters: bg ki zameen par, perspective size ke saath
         shot = sc.get("shot", "medium")
         cast = sc["cast"][:1] if shot == "close" else sc["cast"]
@@ -298,11 +336,7 @@ class Renderer:
         if (i > 0 and sc.get("location") is not None and self.scenes[i - 1].get("location") == sc.get("location")
                 and shot != "close" and self.scenes[i - 1].get("shot") != "close"):
             pc = {p["who"]: p for p in self.scenes[i - 1]["cast"]}
-        ei = int((lt - nf["env_off"]) * FPS)
-        speaking = 0 <= ei < len(nf["env"])
-        mouth = float(nf["env"][ei]) if speaking else 0.0
-        vis = int(nf["vis"][ei]) if speaking and "vis" in nf else 2
-        hy = meta["horizon"] * H + sdy
+        hy = min(0.66, max(0.42, meta["horizon"])) * H + sdy
         Hc = SHOT.get(shot, SHOT["medium"]) * H * (0.92 if n >= 3 else 1.0)
         if shot == "close":
             fy0 = CLOSE_GK * H + 0.775 * Hc + sdy
@@ -314,6 +348,21 @@ class Renderer:
             fyk = fy0 + (offs[k % 3] if n > 1 and shot != "close" else 0.0)
             sc_k = min(1.15, max(0.86, (fyk - hy) / max(1.0, fy0 - hy))) if (n > 1 and shot != "close") else 1.0
             plan.append((fyk, k, sc_k))
+        if shot != "close":                                # public jagah: pichhe chalte/khade log (main cast se chhote, perspective se)
+            s0 = max(1.0, fy0 - hy)
+            ex = []
+            for e in self.crowd(sc.get("location", 0) if isinstance(sc.get("location", 0), int) else 0):
+                fe = hy + s0 * (0.16 + 0.44 * e["depth"])
+                He = max(0.07 * H, (fe - hy) * PERSP)
+                sp = rick.walk_speed(e["act"]) * He
+                span = 1.5 * W
+                fxe = ((e["x"] * span + e["d"] * sp * tg) % span) - 0.25 * W + sdx
+                ex.append((fe, fxe, He, e))
+            for fe, fxe, He, e in sorted(ex, key=lambda q: q[0]):
+                if -0.15 * W < fxe < 1.15 * W:
+                    cast_shadow(frame, fxe, fe, He, ls, T["shadow"])
+                    self.put(frame, e["ch"], e["act"], "neutral", tg + e["ph"], fxe, fe, He, e["d"], 2.0, e["k"] * 1.7, T, meta, ls,
+                             0.3, haze=0.16 * (1 - e["depth"]) + 0.03, soft=0.7 + 1.3 * (1 - e["depth"]))
         for fyk, k, sc_k in sorted(plan):                  # door wale pehle
             c = cast[k]
             ch = self.chars[c["who"]]
@@ -334,23 +383,11 @@ class Renderer:
                 fx = min(0.92 * W, max(0.08 * W, fx))
             enter = 2.0 if cont else (lt - 0.06 * k) / 0.32
             Hs = Hk * (0.92 + 0.08 * rick.back(enter)) if enter < 1 else Hk
-            zi = min(2, int(min(0.999, max(0.0, fx / W)) * 3))
-            zc = np.array(meta["zones"][zi], np.float32)
-            zn = np.clip(zc / (zc.mean() + 1e-6), 0.8, 1.2)
-            expo = float(np.clip(0.80 + 0.45 * zc.mean() / 255.0, 0.85, 1.08))
-            amb = tuple(float(v) for v in np.array(T["amb"], np.float32) * (0.62 + 0.38 * zn) * expo)
             if shot != "close":
                 cast_shadow(frame, fx, fyk, Hs, ls, T["shadow"])
-            r = rick.render_char(W, H, fx, fyk, Hs, ch, act, c["emotion"], tt, 0.0, d, enter,
-                                 self.seed % 7 + k * 1.3, amb, tuple(v * 0.10 for v in T["rim"]), ls, 0,
-                                 1.0 if act == "talk" else 0.0, 1.0 if n > 1 else 0.3, T["key"], T["bounce"])
-            if r is None:
-                continue
-            rgb, a, x0, y0 = r
-            a = a * min(1.0, max(0.0, enter * 4))
-            h, w = a.shape
-            reg = frame[y0:y0 + h, x0:x0 + w].astype(np.float32)
-            frame[y0:y0 + h, x0:x0 + w] = (reg * (1 - a[..., None]) + rgb * a[..., None]).astype(np.uint8)
+            self.put(frame, ch, act, c["emotion"], tt, fx, fyk, Hs, d, enter, self.seed % 7 + k * 1.3, T, meta, ls,
+                     1.0 if n > 1 else 0.3, talk=1.0 if act == "talk" else 0.0, soft=0.6,
+                     alpha=min(1.0, max(0.0, enter * 4)))
         # ---- camera zoom + shake + scene-start punch
         shk = 0.0
         if sc.get("sfx") in SFX_AT and 0 <= lt - 0.3 < 0.35:
@@ -364,8 +401,6 @@ class Renderer:
         frame = warp(frame, cz, shk * math.sin(lt * 90), shk * math.cos(lt * 77))
         lg = self.light(i, tone, ls).layer(lt, tg, 0.93 + 0.07 * math.sin(tg * 9.0 + i) if tone == "indoor" else 1.0)
         frame = post(frame, self.vig, self.grain, f, lg, self.luts[tone], flash)
-        if NARRATOR:
-            narrator_badge(frame, tg, mouth, vis)
         # ---- captions
         seen = [w for w, a_, b_ in nf["words"] if a_ <= lt]
         if seen:
