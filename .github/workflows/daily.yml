@@ -1,4 +1,4 @@
-name: Daily Explainer Short
+name: Daily Relatable Short
 
 on:
   schedule:
@@ -6,16 +6,8 @@ on:
     - cron: "0 13 * * *"
   workflow_dispatch:
     inputs:
-      mode:
-        description: "Kya banana hai? short = sirf ek Short | long = sirf long video | both = long + promo Short"
-        type: choice
-        default: short
-        options:
-          - short
-          - long
-          - both
       upload:
-        description: "YouTube par upload karna hai? Band karo to sirf test hoga"
+        description: "YouTube par upload karna hai? Band karo to sirf test hoga (video artifact mein milegi)"
         type: boolean
         default: true
 
@@ -24,8 +16,6 @@ permissions:
 
 env:
   MAX_DELAY_MIN: "240"
-  LONG_TARGET_WORDS: "1500"
-  MODE: ${{ inputs.mode || 'both' }}
   DO_UPLOAD: ${{ (github.event_name == 'workflow_dispatch' && inputs.upload == false) && 'false' || 'true' }}
 
 jobs:
@@ -68,7 +58,7 @@ jobs:
         run: python script_gen.py
 
       - name: Render video
-        timeout-minutes: 12
+        timeout-minutes: 20
         env:
           MUSIC_MODE: synth
         run: |
@@ -83,15 +73,14 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: python main.py
 
-      - name: Keep videos as artifact (manual runs only)
+      - name: Keep video as artifact (manual runs only)
         if: always() && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: videos
+          name: video
           path: |
-            output_*.mp4
-            thumbnail.jpg
-            script_*.json
+            output.mp4
+            script.json
           retention-days: 2
           if-no-files-found: ignore
 
