@@ -1,10 +1,12 @@
 """Stick-man character v2 (RicksClips style): bada gol safed sar, mote outline, kapde, sneakers.
-Sab kuch code se draw hota hai (free). Is version mein:
+Sab kuch code se draw hota hai (free). v3: asli haath (palm+angutha+ungliyan, point mein ungli), skin-colour forearm + sleeves,
+collar/polo/hoodie/stripe shirts, belt, jeans cuff, shoes (toe cap + laces). Pichhle version mein:
  - IK fix (elbow bahar, knee aage), eyebrows ka emotion bug fix
  - lipsync: 4 mouth shapes (band / oh / ah / ee) + teeth + tongue, audio se aate hain
  - animation: anticipation/overshoot, breathing, weight shift, hop, squash&stretch, proper walk cycle
  - light: scene ki light direction (ls), key/fill, ground bounce, directional rim light"""
 import math
+import zlib
 
 import cv2
 import numpy as np
@@ -302,6 +304,27 @@ def mouth_draw(pen, mc, H, ow, lw, mshape, mo, vis, d, t, ek=1.0):
         pen.poly(tu + td[::-1], (252, 252, 252), 0)
 
 
+def hand(pen, c, dv, R, ow, pointing=False):
+    """Asli haath: ungliyan + palm + angutha. c = haath ka markaz (px), dv = forearm ki direction (unit), R = haath ka radius (px)."""
+    ang = math.degrees(math.atan2(dv[1], dv[0]))
+    nx, ny = -dv[1], dv[0]
+    side = -1 if ny > 0 else 1                                   # angutha hamesha upar ki taraf
+    pc = (c[0] + dv[0] * R * 0.55, c[1] + dv[1] * R * 0.55)
+    if pointing:
+        tip = (pc[0] + dv[0] * R * 2.3, pc[1] + dv[1] * R * 2.3)
+        pen.line([pc, tip], R * 0.50, SKIN, ow * 0.8)
+        for j in (0.45, 0.85):                                   # baaki ungliyan mudi hui
+            pen.ellipse((pc[0] + dv[0] * R * 0.55 - nx * side * R * j, pc[1] + dv[1] * R * 0.55 - ny * side * R * j), R * 0.42, R * 0.30, SKIN, ow * 0.7, ang)
+    else:
+        for j in (-1, 0, 1):
+            fc = (pc[0] + dv[0] * R * 0.95 + nx * j * R * 0.55, pc[1] + dv[1] * R * 0.95 + ny * j * R * 0.55)
+            pen.ellipse(fc, R * 0.55, R * 0.30, SKIN, ow * 0.7, ang)
+    pen.ellipse(pc, R * 1.05, R * 0.85, SKIN, ow, ang)
+    tb = (pc[0] + side * nx * R * 0.80 + dv[0] * R * 0.15, pc[1] + side * ny * R * 0.80 + dv[1] * R * 0.15)
+    pen.ellipse(tb, R * 0.55, R * 0.30, SKIN, ow * 0.8, ang + side * 45)
+    pen.ellipse((pc[0] - dv[0] * R * 0.2 - side * nx * R * 0.2, pc[1] - dv[1] * R * 0.2 - side * ny * R * 0.2), R * 0.35, R * 0.22, (255, 255, 255), 0, ang)
+
+
 def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing, enter, blink_seed, ls):
     """pen: Pen window; (fx,fy) = pairon ka markaz (window coords, px); H = qad px; facing +1 right / -1 left;
     ls = light ki taraf (+1 light daayen se, -1 baayen se)."""
@@ -311,6 +334,7 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     hat_c = col(ch.get("hat_color", "red"), SHIRTS, SHIRTS["red"])
     hair_c = col(ch.get("hair_color", "brown"), HAIRS, HAIRS["brown"])
     pants = col(ch.get("pants", "navy" if not ch.get("overalls") else "blue"), SHIRTS, SHIRTS["navy"])
+    style = ch.get("style") or ("tee", "polo", "stripe", "hoodie")[zlib.crc32(str(ch.get("name", "x")).encode()) % 4]
     ow = max(1.3, 0.011 * H)
     lw = max(1.6, 0.017 * H)
     po = pose(action, t, talk, mouth)
@@ -333,26 +357,42 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     sh_y = 0.585
     lsh = (-0.075 + lean * 0.85, sh_y)
     rsh = (0.075 + lean * 0.85, sh_y)
-    # ---- legs (pants, sneakers)
+    # ---- legs (jeans + cuff, sneakers: toe cap + sole + laces)
     for side, key in ((-1, "lf"), (1, "rf")):
         foot = po[key]
         hp = (side * 0.04, hip_y + bob)
         kn = ik(hp, (foot[0], foot[1]), 0.17, 0.18, lambda ex, ey: ex)    # knee hamesha aage
-        pen.line([(X(hp[0]), Yf(hp[1] - bob)), (X(kn[0]), Yf(kn[1] - bob * 0.5)), (X(foot[0]), Yf(foot[1] + 0.014))], 0.030 * H, pants, ow)
+        pts_l = [(X(hp[0]), Yf(hp[1] - bob)), (X(kn[0]), Yf(kn[1] - bob * 0.5)), (X(foot[0]), Yf(foot[1] + 0.014))]
+        pen.line(pts_l, 0.034 * H, pants, ow)
+        pen.line([pts_l[1], pts_l[2]], max(1.0, 0.004 * H), shade(pants, 0.78))                         # kapde ki silwat
+        cf = lerp2(pts_l[1], pts_l[2], 0.72)
+        pen.line([cf, pts_l[2]], 0.040 * H, shade(pants, 0.86), ow * 0.6)                               # pant cuff
         fxp, fyp = X(foot[0] + 0.024), Yf(foot[1] + 0.010)
-        pen.ellipse((fxp, fyp), 0.040 * H * sx, 0.019 * H, (244, 244, 244), ow * 0.8)
-        pen.line([(fxp - d * 0.034 * H, fyp + 0.011 * H), (fxp + d * 0.034 * H, fyp + 0.011 * H)], max(1.2, 0.006 * H), (150, 150, 160))
+        pen.ellipse((fxp, fyp), 0.042 * H * sx, 0.021 * H, (244, 244, 244), ow * 0.8)
+        pen.ellipse((fxp + d * 0.022 * H, fyp + 0.003 * H), 0.020 * H * sx, 0.016 * H, hat_c, 0)           # toe cap
+        for lz in (-0.006, 0.006):                                                                         # laces
+            pen.line([(fxp - d * 0.014 * H + lz * H * d, fyp - 0.016 * H), (fxp - d * 0.006 * H + lz * H * d, fyp - 0.006 * H)], max(1.0, 0.004 * H), (120, 120, 130))
+        pen.line([(fxp - d * 0.038 * H, fyp + 0.013 * H), (fxp + d * 0.038 * H, fyp + 0.013 * H)], max(1.6, 0.008 * H), (95, 95, 108))
 
-    # ---- arms
-    def arm(sh, hand, side):
-        hand = (hand[0] + lean * 0.5, hand[1])
-        el = ik(sh, hand, 0.14, 0.15, lambda ex, ey: side * ex - 0.7 * ey)      # elbow bahar + neeche
-        pts = [(X(sh[0]), Yb(sh[1])), (X(el[0]), Yb(el[1])), (X(hand[0]), Yb(hand[1]))]
-        pen.line(pts, lw, INK)
-        sl = lerp2(sh, el, 0.9)                                                # short sleeve
-        pen.line([pts[0], (X(sl[0]), Yb(sl[1]))], 0.034 * H, shirt, ow * 0.8)
-        pen.circle(pts[2], 0.024 * H, SKIN, ow * 0.7)
-        pen.circle((pts[2][0] + d * 0.006 * H, pts[2][1] - 0.006 * H), 0.008 * H, (255, 255, 255), 0)
+    # ---- arms: skin forearm + sleeve (hoodie = poori aasteen) + asli haath
+    long_sl = style == "hoodie"
+
+    def arm(sh, hand_p, side, pointing=False):
+        hand_p = (hand_p[0] + lean * 0.5, hand_p[1])
+        el = ik(sh, hand_p, 0.14, 0.15, lambda ex, ey: side * ex - 0.7 * ey)      # elbow bahar + neeche
+        pts = [(X(sh[0]), Yb(sh[1])), (X(el[0]), Yb(el[1])), (X(hand_p[0]), Yb(hand_p[1]))]
+        pen.line(pts, 0.026 * H, SKIN, ow * 0.9)                                  # skin wali bazu (outline ke saath)
+        if long_sl:
+            wr = lerp2(pts[1], pts[2], 0.78)
+            pen.line([pts[0], pts[1], wr], 0.040 * H, shirt, ow * 0.8)
+            pen.line([lerp2(pts[1], pts[2], 0.70), wr], 0.044 * H, shade(shirt, 0.78), ow * 0.6)      # cuff
+        else:
+            sl = lerp2(pts[0], pts[1], 0.78)
+            pen.line([pts[0], sl], 0.044 * H, shirt, ow * 0.8)
+            pen.line([lerp2(pts[0], pts[1], 0.66), sl], 0.046 * H, shade(shirt, 0.82), ow * 0.5)      # sleeve ka kinara
+        fv = (pts[2][0] - pts[1][0], pts[2][1] - pts[1][1])
+        fl = max(1e-6, math.hypot(*fv))
+        hand(pen, pts[2], (fv[0] / fl, fv[1] / fl), 0.026 * H, ow * 0.7, pointing)
 
     arm(lsh, po["lh"], -1)
     # ---- torso
@@ -367,6 +407,30 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     elif ch.get("tie"):
         pen.poly([(X(shear(-0.014, 0.60)), Yb(0.60)), (X(shear(0.014, 0.60)), Yb(0.60)), (X(shear(0.02, 0.45)), Yb(0.45)),
                   (X(shear(0, 0.42)), Yb(0.42)), (X(shear(-0.02, 0.45)), Yb(0.45))], (170, 30, 40), ow * 0.4)
+    if not ch.get("overalls"):
+        dk = shade(shirt, 0.80)
+        if style == "stripe":
+            for yy_ in (0.55, 0.49, 0.43, 0.37):
+                pen.line([(X(shear(-0.094, yy_)), Yb(yy_)), (X(shear(0.094, yy_)), Yb(yy_))], 0.017 * H, dk)
+        elif style == "polo":
+            for sg in (-1, 1):                                                  # collar
+                pen.poly([(X(shear(sg * 0.012, 0.600)), Yb(0.600)), (X(shear(sg * 0.060, 0.600)), Yb(0.595)), (X(shear(sg * 0.030, 0.545)), Yb(0.545))],
+                         shade(shirt, 1.12), ow * 0.5)
+            pen.line([(X(shear(0, 0.56)), Yb(0.56)), (X(shear(0, 0.44)), Yb(0.44))], max(1.2, 0.005 * H), dk)
+            for yb_ in (0.53, 0.47):
+                pen.circle((X(shear(0, yb_)), Yb(yb_)), 0.006 * H, (245, 245, 245), 0)
+        elif style == "hoodie":
+            pen.ellipse((X(shear(0, 0.585)), Yb(0.585)), 0.078 * H * sx, 0.028 * H, dk, ow * 0.5)      # hood neck par
+            pen.poly([(X(shear(x, y)), Yb(y)) for x, y in rrect_pts(-0.062, 0.455, 0.062, 0.345, 0.018, 3)], shade(shirt, 0.88), ow * 0.5)
+            for sg in (-1, 1):
+                pen.line([(X(shear(sg * 0.02, 0.57)), Yb(0.57)), (X(shear(sg * 0.026, 0.50)), Yb(0.50))], max(1.2, 0.005 * H), (235, 235, 235))
+        else:                                                                    # tee: seene par jeb + crew neckline
+            pen.poly([(X(shear(x, y)), Yb(y)) for x, y in rrect_pts(0.020, 0.52, 0.074, 0.45, 0.01, 3)], shade(shirt, 0.90), ow * 0.4)
+            pen.ellipse((X(shear(0, 0.600)), Yb(0.600)), 0.040 * H * sx, 0.018 * H, shade(shirt, 0.72), 0)
+        pen.line([(X(shear(-0.095, 0.352)), Yb(0.352)), (X(shear(0.095, 0.352)), Yb(0.352))], max(1.2, 0.006 * H), dk)       # hem
+        for fx_, fy_ in ((-0.05, 0.50), (0.04, 0.42)):                           # kapde ki silwatein (folds)
+            pen.line([(X(shear(fx_, fy_)), Yb(fy_)), (X(shear(fx_ + 0.018, fy_ - 0.05)), Yb(fy_ - 0.05)), (X(shear(fx_ - 0.004, fy_ - 0.09)), Yb(fy_ - 0.09))],
+                     max(1.0, 0.004 * H), shade(shirt, 0.86))
     # torso shading: light ki ulti taraf andhera, light wali taraf halka highlight
     y0b, y1b = max(0, int(Yb(0.60) * pen.ss)), max(0, int(Yb(0.33) * pen.ss))
     if y1b > y0b:
@@ -378,6 +442,9 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
         pen.rgb[y0b:y1b] = np.clip(band * (1 - dark * m) + 255 * lit * m * 0.5, 0, 255).astype(np.uint8)
     # hip joint cover
     pen.ellipse((X(0), Yb(0.340)), 0.066 * H * sx, 0.015 * H, pants, ow * 0.35)
+    if not ch.get("overalls") and style != "hoodie":                              # belt + buckle
+        pen.line([(X(shear(-0.097, 0.343)), Yb(0.343)), (X(shear(0.097, 0.343)), Yb(0.343))], 0.016 * H, (58, 42, 34), ow * 0.5)
+        pen.poly([(X(shear(x, y)), Yb(y)) for x, y in rrect_pts(-0.014, 0.352, 0.014, 0.334, 0.004, 2)], (226, 190, 80), ow * 0.3)
     # ---- head (thoda lag ke saath => secondary motion)
     hx = shear(0.0, 0.60) * 1.0 + po["tilt"] * 0.6 - lean * 0.15
     hc = (X(hx), Yb(0.775 + po["nod"]))
@@ -471,7 +538,7 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
         sd = (t * 1.2) % 1.0 * 0.05 * H if emo == "cry" else 0.0
         pen.poly([(sx_, hc[1] - r * 0.1 + sd), (sx_ + 0.012 * H, hc[1] + r * 0.08 + sd), (sx_, hc[1] + r * 0.22 + sd), (sx_ - 0.012 * H, hc[1] + r * 0.08 + sd)], (130, 190, 240), ow * 0.3)
     # ---- front arm
-    arm(rsh, po["rh"], 1)
+    arm(rsh, po["rh"], 1, action == "point")
 
 
 def shift_mask(a, dx, dy):
