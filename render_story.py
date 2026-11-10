@@ -209,62 +209,71 @@ def create(data, out_path):
     faulthandler.dump_traceback_later(300, repeat=True)
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     starts = [x["start"] for x in info]
+    last = None
     try:
         for f in range(n_frames):
-            tg = f / FPS
-            i = max(k for k in range(len(scenes)) if starts[k] <= tg + 1e-9)
-            sc, nf = scenes[i], info[i]
-            lt = tg - starts[i]
-            tone = sc.get("tone", "day")
-            amb, rim = LIGHT.get(tone, LIGHT["day"])
-            z, px, py = camera(sc.get("camera", "push_in"), lt, nf["hold"], i)
-            frame = bg_frame(bgs[i], 1.0 + 0.0 * z, px, py, lt, i)
-            # ---- characters
-            hk, gk = SHOT.get(sc.get("shot", "medium"), SHOT["medium"])
-            cast = sc["cast"]
-            if sc.get("shot") == "close":
-                cast = cast[:1]
-            ei = int((lt - nf["env_off"]) * FPS)
-            speaking = 0 <= ei < len(nf["env"])
-            mouth0 = float(nf["env"][ei]) if speaking else 0.0
-            order = sorted(range(len(cast)), key=lambda k: cast[k]["x"])
-            for k in order:
-                c = cast[k]
-                ch = chars[c["who"]]
-                Hc = hk * H * (0.92 if len(cast) >= 3 else 1.0)
+            try:
+                tg = f / FPS
+                i = max(k for k in range(len(scenes)) if starts[k] <= tg + 1e-9)
+                sc, nf = scenes[i], info[i]
+                lt = tg - starts[i]
+                tone = sc.get("tone", "day")
+                amb, rim = LIGHT.get(tone, LIGHT["day"])
+                z, px, py = camera(sc.get("camera", "push_in"), lt, nf["hold"], i)
+                frame = bg_frame(bgs[i], 1.0 + 0.0 * z, px, py, lt, i)
+                # ---- characters
+                hk, gk = SHOT.get(sc.get("shot", "medium"), SHOT["medium"])
+                cast = sc["cast"]
                 if sc.get("shot") == "close":
-                    fx, fy = W * (0.5 + (c["x"] - 0.5) * 0.4), gk * H + 0.775 * Hc
-                else:
-                    fx, fy = c["x"] * W, gk * H
-                enter = (lt - 0.06 * k) / 0.32
-                Hs = Hc * (0.86 + 0.14 * rick.back(enter)) if enter < 1 else Hc
-                if sc.get("shot") != "close":
-                    shadow(frame, fx, fy + 0.004 * Hs, 0.16 * Hs, 0.028 * Hs)
-                r = rick.render_char(W, H, fx, fy, Hs, ch, c["action"], c["emotion"], lt + k * 0.4,
-                                     mouth0 if k == 0 else 0.0, c.get("facing", 1), enter, seed % 7 + k * 1.3, amb, tuple(v * 0.16 for v in rim))
-                if r is None:
-                    continue
-                rgb, a, x0, y0 = r
-                h, w = a.shape
-                reg = frame[y0:y0 + h, x0:x0 + w].astype(np.float32)
-                frame[y0:y0 + h, x0:x0 + w] = (reg * (1 - a[..., None]) + rgb * a[..., None]).astype(np.uint8)
-            # ---- camera zoom + shake on whole frame
-            shk = 0.0
-            if sc.get("sfx") in SFX_AT and 0 <= lt - 0.3 < 0.35:
-                shk = 14 * math.exp(-(lt - 0.3) * 9)
-            cz = 1.0 + (z - 1.0) * 0.5
-            frame = warp(frame, cz, shk * math.sin(lt * 90), shk * math.cos(lt * 77))
-            frame = post(frame, vig, grain, f)
-            # ---- captions
-            seen = [w for w, a_, b_ in nf["words"] if a_ <= lt]
-            if seen:
-                top = top_caption(seen[-8:])
-                blit(frame, top, W / 2, 255)
-                cur = [(w, a_, b_) for w, a_, b_ in nf["words"] if a_ <= lt < b_ + 0.12]
-                if cur:
-                    w, a_, b_ = cur[0]
-                    pop = 1.0 + 0.28 * max(0.0, 1 - (lt - a_) / 0.11)
-                    blit(frame, word_sprite(w.strip(".,!?;:\"")), W / 2, 1385, pop)
+                    cast = cast[:1]
+                ei = int((lt - nf["env_off"]) * FPS)
+                speaking = 0 <= ei < len(nf["env"])
+                mouth0 = float(nf["env"][ei]) if speaking else 0.0
+                order = sorted(range(len(cast)), key=lambda k: cast[k]["x"])
+                for k in order:
+                    c = cast[k]
+                    ch = chars[c["who"]]
+                    Hc = hk * H * (0.92 if len(cast) >= 3 else 1.0)
+                    if sc.get("shot") == "close":
+                        fx, fy = W * (0.5 + (c["x"] - 0.5) * 0.4), gk * H + 0.775 * Hc
+                    else:
+                        fx, fy = c["x"] * W, gk * H
+                    enter = (lt - 0.06 * k) / 0.32
+                    Hs = Hc * (0.86 + 0.14 * rick.back(enter)) if enter < 1 else Hc
+                    if sc.get("shot") != "close":
+                        shadow(frame, fx, fy + 0.004 * Hs, 0.16 * Hs, 0.028 * Hs)
+                    r = rick.render_char(W, H, fx, fy, Hs, ch, c["action"], c["emotion"], lt + k * 0.4,
+                                         mouth0 if k == 0 else 0.0, c.get("facing", 1), enter, seed % 7 + k * 1.3, amb, tuple(v * 0.16 for v in rim))
+                    if r is None:
+                        continue
+                    rgb, a, x0, y0 = r
+                    h, w = a.shape
+                    reg = frame[y0:y0 + h, x0:x0 + w].astype(np.float32)
+                    frame[y0:y0 + h, x0:x0 + w] = (reg * (1 - a[..., None]) + rgb * a[..., None]).astype(np.uint8)
+                # ---- camera zoom + shake on whole frame
+                shk = 0.0
+                if sc.get("sfx") in SFX_AT and 0 <= lt - 0.3 < 0.35:
+                    shk = 14 * math.exp(-(lt - 0.3) * 9)
+                cz = 1.0 + (z - 1.0) * 0.5
+                frame = warp(frame, cz, shk * math.sin(lt * 90), shk * math.cos(lt * 77))
+                frame = post(frame, vig, grain, f)
+                # ---- captions
+                seen = [w for w, a_, b_ in nf["words"] if a_ <= lt]
+                if seen:
+                    top = top_caption(seen[-8:])
+                    blit(frame, top, W / 2, 255)
+                    cur = [(w, a_, b_) for w, a_, b_ in nf["words"] if a_ <= lt < b_ + 0.12]
+                    if cur:
+                        w, a_, b_ = cur[0]
+                        pop = 1.0 + 0.28 * max(0.0, 1 - (lt - a_) / 0.11)
+                        blit(frame, word_sprite(w.strip(".,!?;:\"")), W / 2, 1385, pop)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                if last is None:
+                    raise
+                frame = last
+            last = frame
             try:
                 proc.stdin.write(frame.tobytes())
             except BrokenPipeError:
@@ -273,6 +282,10 @@ def create(data, out_path):
                 print(f"[render] frame {f}/{n_frames} ({time.time() - t_start:.0f}s)", flush=True)
         proc.stdin.close()
     finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
         rc = proc.wait()
         faulthandler.cancel_dump_traceback_later()
     if rc != 0:
