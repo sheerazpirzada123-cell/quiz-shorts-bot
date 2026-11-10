@@ -9,8 +9,9 @@ import numpy as np
 import requests
 
 W, H = 1080, 1920
-STYLE = ("stylized 3D render, Unreal Engine 5 look, vibrant saturated colors, soft cinematic lighting, depth of field, "
-         "clean detailed environment, vertical 9:16, no people, no characters, no text, no watermark, empty open ground in lower third")
+STYLE = ("ultra realistic photograph, real location, shot on 35mm lens at human eye level, natural lighting, sharp detail, "
+         "realistic textures, straight-on view, clearly visible horizon, wide flat empty ground or floor across the lower half, "
+         "vertical 9:16, absolutely no people, no humans, no crowd, no characters, no text, no watermark")
 CACHE = "bgcache"
 TONE_WORDS = {"day": "bright daytime, clear blue sky, sunlight", "night": "nighttime, dark night sky, moonlight, lamps glowing",
               "sunset": "golden hour sunset, warm orange sky, long soft shadows", "indoor": "indoors, interior room, warm lamp light"}
@@ -86,10 +87,10 @@ def procedural(tone, seed):
 
 
 TONE_GRADE = {   # (shadow tint BGR->RGB below, highlight tint, saturation, contrast)
-    "day": ((0.93, 1.0, 1.10), (1.06, 1.02, 0.94), 1.10, 1.08),
-    "night": ((0.80, 0.92, 1.25), (0.92, 1.0, 1.18), 1.06, 1.12),
-    "sunset": ((0.90, 0.92, 1.12), (1.14, 1.0, 0.82), 1.14, 1.10),
-    "indoor": ((0.95, 0.95, 1.05), (1.10, 1.03, 0.88), 1.08, 1.08),
+    "day": ((0.96, 1.0, 1.06), (1.04, 1.01, 0.97), 1.04, 1.04),
+    "night": ((0.85, 0.94, 1.18), (0.94, 1.0, 1.12), 1.03, 1.08),
+    "sunset": ((0.93, 0.94, 1.08), (1.10, 1.0, 0.88), 1.08, 1.06),
+    "indoor": ((0.97, 0.97, 1.03), (1.07, 1.02, 0.93), 1.04, 1.04),
 }
 
 
@@ -97,7 +98,7 @@ def grade(img, tone):
     """Cinematic grade (ek baar per scene): local contrast, S-curve, saturation, teal/orange tint, centre pop."""
     sh, hi, sat, con = TONE_GRADE.get(tone, TONE_GRADE["day"])
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    lab[..., 0] = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(6, 8)).apply(lab[..., 0])
+    lab[..., 0] = cv2.createCLAHE(clipLimit=1.1, tileGridSize=(6, 8)).apply(lab[..., 0])
     f = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype(np.float32) / 255.0
     g = f.mean(axis=2, keepdims=True)
     f = g + (f - g) * sat
@@ -123,7 +124,7 @@ def find_horizon(crop):
     score = diff * (1 - 0.9 * np.abs(ys - 0.56))
     ok = (ys > 0.38) & (ys < 0.74)
     if not ok.any() or diff[ok].max() < 22:
-        return 0.56
+        return 0.54            # eye-level photo: horizon aam taur par frame ke beech ke aas-paas
     return float(ys[ok][np.argmax(score[ok])])
 
 
