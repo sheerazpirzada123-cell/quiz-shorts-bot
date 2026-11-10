@@ -45,14 +45,21 @@ STRUCTURE (narration is spoken by a voice, ~115-140 words total, simple words, s
 5. PAYOFF: the real-world result - "and that's why ..." - one clean memorable line. Last line should loop naturally back to the hook.
 FACTS: base it on a REAL, verifiable historical origin/fact; do not invent fake history. You may dramatize with simple characters/jokes, but the core fact must be true.
 
+WORLD (keep it CONSISTENT): pick ONE time_of_day for the whole video (day | sunset | night) and 2-3 locations (a fixed place each, e.g. "workshop", "street", "factory floor").
+The story moves in order, so stay in one location for several scenes in a row before changing; NEVER flip between day and night. Each location has a bg_prompt:
+a concrete description of the 3D-rendered ENVIRONMENT only (place, objects, light that matches the time_of_day) - NO people, NO text. indoor=true if it is inside a room/building.
 SCENES: 12-15 scenes, each = ONE short narration sentence/phrase (5-12 words) that is shown with visuals. Every scene needs:
- - bg_prompt: concrete description of the 3D-rendered ENVIRONMENT only (place, objects, light, time of day) - NO people, NO text.
- - tone: day|night|sunset|indoor (for lighting/colour grade).
- - shot: wide | medium | close   (close = a big face reaction, use for key emotional beats; vary shots!)
+ - location: index into locations.
+ - shot: wide | medium | close   (close = a big face reaction, only for 1-2 key beats; vary shots!)
  - camera: push_in | pull_out | pan_left | pan_right | static   (mostly push_in / pan, smooth)
  - cast: 1-3 characters on screen: who (index in characters), x (0.15-0.85 horizontal position), action, emotion, facing (1 right / -1 left).
-   Characters must ACT out exactly what the narration says (point at things, shock, walk, hold items, laugh...). Rival smirks while doing evil things.
  - sfx: one sound effect at the key moment (or none).
+ACTING (natural, NOT over the top):
+ - A narrator voice tells the story and the characters NEVER lip-sync, so feelings are shown only with face + body.
+ - emotion must match what the narration says in THAT scene. Default to neutral / happy / worried / smug / proud / confused.
+   Use surprised, scared, laughing, excited, evil, cry at most 2 times in the whole video.
+ - action: mostly idle, talk (gentle gesturing), point, think, hold, walk, shrug. shock, celebrate, laugh, angry, facepalm, run, sad: at most once each, only on the big beat.
+ - Characters stay standing at about the same x in neighbouring scenes of the same location (move by at most 0.25 unless action is walk/run) - no teleporting.
 CHARACTERS: 2-4 characters. The hero: yellow shirt + red cap (hat: cap, hat_color red) works great; rival: black/navy suit, hat: slick, tie true; extras: other shirt colors.
 Return JSON only."""
 
@@ -65,13 +72,15 @@ def schema():
           "required": ["name", "shirt", "hat", "hat_color", "hair_color", "overalls", "tie", "glasses", "mustache"]}
     cast = {"type": "OBJECT", "properties": {"who": {"type": "INTEGER"}, "x": {"type": "NUMBER"}, "action": S(enum=ACTIONS),
             "emotion": S(enum=EMOS), "facing": {"type": "INTEGER"}}, "required": ["who", "x", "action", "emotion", "facing"]}
-    sc = {"type": "OBJECT", "properties": {"text": S(), "bg_prompt": S(), "tone": S(enum=TONES),
+    loc = {"type": "OBJECT", "properties": {"name": S(), "bg_prompt": S(), "indoor": {"type": "BOOLEAN"}}, "required": ["name", "bg_prompt", "indoor"]}
+    sc = {"type": "OBJECT", "properties": {"text": S(), "location": {"type": "INTEGER"},
           "shot": S(enum=["wide", "medium", "close"]), "camera": S(enum=["push_in", "pull_out", "pan_left", "pan_right", "static"]),
           "cast": {"type": "ARRAY", "items": cast}, "sfx": S(enum=SFX)},
-          "required": ["text", "bg_prompt", "tone", "shot", "camera", "cast", "sfx"]}
+          "required": ["text", "location", "shot", "camera", "cast", "sfx"]}
     return {"type": "OBJECT", "properties": {"topic": S(), "title": S(), "description": S(), "tags": {"type": "ARRAY", "items": S()},
-            "music_mood": S(enum=MOODS), "characters": {"type": "ARRAY", "items": ch}, "scenes": {"type": "ARRAY", "items": sc}},
-            "required": ["topic", "title", "description", "tags", "music_mood", "characters", "scenes"]}
+            "music_mood": S(enum=MOODS), "time_of_day": S(enum=["day", "sunset", "night"]), "locations": {"type": "ARRAY", "items": loc},
+            "characters": {"type": "ARRAY", "items": ch}, "scenes": {"type": "ARRAY", "items": sc}},
+            "required": ["topic", "title", "description", "tags", "music_mood", "time_of_day", "locations", "characters", "scenes"]}
 
 
 def ask(prompt, sch, max_out=7000, think=1024):
@@ -105,6 +114,27 @@ def load_history():
         return []
 
 
+def finalize(d):
+    """Location -> bg_prompt/tone (poori video mein ek time-of-day), aur characters same jagah ke scenes mein teleport na karein."""
+    tod = d.get("time_of_day") if d.get("time_of_day") in ("day", "sunset", "night") else "day"
+    locs = [l for l in (d.get("locations") or []) if l.get("bg_prompt")] or [dict(name="scene", bg_prompt="a simple colorful town street", indoor=False)]
+    d["time_of_day"], d["locations"] = tod, locs
+    prev = None
+    for sc in d["scenes"]:
+        li = sc.get("location", 0)
+        li = li if isinstance(li, int) and 0 <= li < len(locs) else 0
+        sc["location"], sc["bg_prompt"] = li, locs[li]["bg_prompt"]
+        sc["tone"] = "indoor" if locs[li].get("indoor") else tod
+        if prev and prev["location"] == li:
+            pw = {c["who"]: c for c in prev["cast"]}
+            for c in sc["cast"]:
+                p = pw.get(c["who"])
+                if p and c["action"] not in ("walk", "run") and abs(c["x"] - p["x"]) > 0.25:
+                    c["x"] = p["x"] + 0.25 * (1 if c["x"] > p["x"] else -1)
+        prev = sc
+    return d
+
+
 def clean(d):
     n = len(d["characters"])
     for sc in d["scenes"]:
@@ -118,21 +148,23 @@ def clean(d):
     if not (8 <= len(d["scenes"]) <= 18 and 70 <= words <= 175):
         raise ValueError(f"bad size: {len(d['scenes'])} scenes / {words} words")
     d["title"] = d["title"][:90]
-    return d
+    return finalize(d)
 
 
 FALLBACK = {
     "topic": "why roller coaster loops are teardrop shaped", "title": "This Shape Saved Roller Coasters #Shorts",
     "description": "The real story behind the teardrop loop.\n\n#animation #storytime #facts #shorts", "tags": ["animation", "storytime", "facts", "shorts"],
-    "music_mood": "quirky",
+    "music_mood": "quirky", "time_of_day": "day",
+    "locations": [dict(name="park", bg_prompt="theme park with a giant steel roller coaster loop, open plaza ground", indoor=False),
+                  dict(name="office", bg_prompt="engineer drafting room with blueprints on the desk and walls", indoor=True)],
     "characters": [dict(name="Hero", shirt="yellow", hat="cap", hat_color="red", hair_color="brown", overalls=True, tie=False, glasses=False, mustache=False),
                    dict(name="Rival", shirt="black", hat="slick", hat_color="black", hair_color="black", overalls=False, tie=True, glasses=False, mustache=False)],
     "scenes": [
-        dict(text="This shape saved roller coasters.", bg_prompt="giant steel roller coaster loop under a blue sky, theme park", tone="day", shot="wide", camera="push_in", cast=[dict(who=0, x=0.7, action="point", emotion="happy", facing=-1)], sfx="whoosh"),
-        dict(text="Early designers built perfectly round loops.", bg_prompt="old wooden amusement park with a round circular roller coaster loop, sunny", tone="day", shot="medium", camera="pan_right", cast=[dict(who=0, x=0.35, action="talk", emotion="happy", facing=1)], sfx="none"),
-        dict(text="But a round loop crushed riders with brutal force.", bg_prompt="roller coaster track tight circular loop, dramatic sky", tone="sunset", shot="close", camera="push_in", cast=[dict(who=0, x=0.5, action="shock", emotion="scared", facing=1)], sfx="gasp"),
-        dict(text="So engineers changed it to a teardrop.", bg_prompt="engineer drafting desk with blueprints of a teardrop shaped loop, warm light", tone="indoor", shot="medium", camera="push_in", cast=[dict(who=0, x=0.35, action="think", emotion="smug", facing=1), dict(who=1, x=0.7, action="idle", emotion="smug", facing=-1)], sfx="sparkle"),
-        dict(text="Gentler rides, happier riders, and that's why loops look like that.", bg_prompt="modern roller coaster with teardrop loop at golden hour, theme park", tone="sunset", shot="wide", camera="pull_out", cast=[dict(who=0, x=0.3, action="celebrate", emotion="excited", facing=1), dict(who=1, x=0.7, action="laugh", emotion="laughing", facing=-1)], sfx="tada"),
+        dict(text="This shape saved roller coasters.", location=0, shot="wide", camera="push_in", cast=[dict(who=0, x=0.6, action="point", emotion="happy", facing=-1)], sfx="whoosh"),
+        dict(text="Early designers built perfectly round loops.", location=0, shot="medium", camera="pan_right", cast=[dict(who=0, x=0.55, action="talk", emotion="neutral", facing=-1)], sfx="none"),
+        dict(text="But a round loop crushed riders with brutal force.", location=0, shot="close", camera="push_in", cast=[dict(who=0, x=0.5, action="idle", emotion="worried", facing=1)], sfx="gasp"),
+        dict(text="So engineers changed it to a teardrop.", location=1, shot="medium", camera="push_in", cast=[dict(who=0, x=0.35, action="think", emotion="neutral", facing=1), dict(who=1, x=0.7, action="idle", emotion="smug", facing=-1)], sfx="sparkle"),
+        dict(text="Gentler rides, happier riders, and that's why loops look like that.", location=0, shot="wide", camera="pull_out", cast=[dict(who=0, x=0.35, action="talk", emotion="proud", facing=1), dict(who=1, x=0.65, action="idle", emotion="happy", facing=-1)], sfx="tada"),
     ],
 }
 
@@ -156,7 +188,8 @@ def main():
                 time.sleep(3)
     if not d:
         print("Gemini unavailable -> fallback story (history mein save nahi hogi)")
-        d, fb = FALLBACK, True
+        import copy
+        d, fb = finalize(copy.deepcopy(FALLBACK)), True
     json.dump(d, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print("SCRIPT:", d["title"], f"({len(d['scenes'])} scenes)")
     if not fb and not any(h.get("topic", "").lower() == d["topic"].lower() for h in hist):
