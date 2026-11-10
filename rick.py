@@ -345,7 +345,7 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, facing=1, enter=1.0, bl
         pen.line([(mc[0] - 0.035 * H, mc[1] + 0.006 * H), (mc[0] + 0.035 * H, mc[1] + 0.006 * H)], lw)
     if ch.get("glasses"):
         for sgn in (-1, 1):
-            pen.ellipse((hc[0] + sgn * ex * H + fxs, ey), 0.036 * H, 0.036 * H, (255, 255, 255), 0, fill=False, ow=lw * 0.6)
+            pen.ellipse((hc[0] + sgn * ex * H + fxs, ey), 0.036 * H, 0.036 * H, (70, 70, 85), fill=False, ow=lw * 0.7)
     if ch.get("mustache"):
         pen.ellipse((mc[0] - 0.02 * H, mc[1] - 0.026 * H), 0.03 * H, 0.012 * H, hair_c, 0)
         pen.ellipse((mc[0] + 0.02 * H, mc[1] - 0.026 * H), 0.03 * H, 0.012 * H, hair_c, 0)
