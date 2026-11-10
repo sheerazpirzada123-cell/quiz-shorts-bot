@@ -55,7 +55,7 @@ jobs:
       - name: Generate script (Gemini)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python script_gen.py
+        run: python story_gen.py
 
       - name: Render video
         timeout-minutes: 20
@@ -63,7 +63,7 @@ jobs:
           MUSIC_MODE: synth
         run: |
           fc-cache -f
-          python render.py
+          python render_story.py
 
       - name: Upload to YouTube
         if: env.DO_UPLOAD == 'true'
