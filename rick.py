@@ -146,6 +146,9 @@ MOUTH = {"flat": (0.035, 0.0, 0.0, 0.0), "smile": (0.046, 0.0, -0.016, 0.0), "bi
 VIS_SHAPE = {1: (0.021, 0.012, 0.050), 2: (0.031, 0.014, 0.068), 3: (0.050, 0.008, 0.026)}   # (hw, ho_min, ho_gain)
 
 
+EXPR = 0.6      # chehre ke expression ki shiddat (1.0 = purana, bohot zyada)
+
+
 def walk_speed(action):
     """Zameen par pair ki average speed (H units / sec) - render_story isi se body ko chalata hai => feet slide nahi karte."""
     if action == "run":
@@ -187,17 +190,17 @@ def pose(action, t, talk, mouth):
         p["lean"] += 0.025
     elif action in ("shock", "scream"):
         q = ease(t / 0.18)
-        tgt["lh"] = (-0.27, 0.70 + 0.03 * s(t * 20) * q)
-        tgt["rh"] = (0.27, 0.70 + 0.03 * s(t * 20 + 1) * q)
-        p["jump"] = 0.045 * s(min(1.0, t / 0.38) * math.pi) if t < 0.38 else 0.0
+        tgt["lh"] = (-0.22, 0.58 + 0.008 * s(t * 14) * q)
+        tgt["rh"] = (0.22, 0.58 + 0.008 * s(t * 14 + 1) * q)
+        p["jump"] = 0.022 * s(min(1.0, t / 0.38) * math.pi) if t < 0.38 else 0.0
         p["bob"] = 0.004 * s(t * 30)
         p["lean"] -= 0.02 * q
         k = ease(t / 0.12)
     elif action == "celebrate":
-        tgt["lh"] = (-0.29, 0.82 + 0.06 * s(t * 9))
-        tgt["rh"] = (0.29, 0.82 + 0.06 * s(t * 9 + 3))
-        p["jump"] = abs(0.045 * s(t * 5.5))
-        p["tilt"] = 0.03 * s(t * 5.5)
+        tgt["lh"] = (-0.26, 0.70 + 0.03 * s(t * 5))
+        tgt["rh"] = (0.26, 0.70 + 0.03 * s(t * 5 + 3))
+        p["jump"] = abs(0.018 * s(t * 4))
+        p["tilt"] = 0.015 * s(t * 4)
     elif action == "shrug":
         sh = ease(t / 0.25) * (0.7 + 0.3 * s(t * 2.6))
         tgt["lh"] = (-0.25, 0.44 + 0.02 * sh)
@@ -216,16 +219,16 @@ def pose(action, t, talk, mouth):
         p["lean"] -= 0.03
         p["nod"] = -0.02
     elif action == "laugh":
-        tgt["lh"] = (-0.08, 0.40 + 0.01 * s(t * 17))
-        tgt["rh"] = (0.08, 0.40 + 0.01 * s(t * 17 + 1))
-        p["jump"] = abs(0.018 * s(t * 15))
-        p["tilt"] = 0.045 * s(t * 15)
+        tgt["lh"] = (-0.08, 0.40 + 0.005 * s(t * 8))
+        tgt["rh"] = (0.08, 0.40 + 0.005 * s(t * 8 + 1))
+        p["jump"] = abs(0.008 * s(t * 9))
+        p["tilt"] = 0.02 * s(t * 8)
         p["lean"] -= 0.015
     elif action == "angry":
-        tgt["lh"] = (-0.17, 0.38 + 0.02 * s(t * 24))
-        tgt["rh"] = (0.17, 0.38 + 0.02 * s(t * 24 + 1))
+        tgt["lh"] = (-0.17, 0.38 + 0.006 * s(t * 8))
+        tgt["rh"] = (0.17, 0.38 + 0.006 * s(t * 8 + 1))
         p["lean"] += 0.035
-        p["bob"] += 0.004 * s(t * 24)
+        p["bob"] += 0.002 * s(t * 8)
         p["nod"] = -0.01
     elif action == "hold":
         tgt["lh"] = (-0.10, 0.41 + 0.004 * s(t * 3))
@@ -256,15 +259,19 @@ def pose(action, t, talk, mouth):
         p["bob"] -= 0.004
     elif action == "sleep":
         p["tilt"] = 0.1
+    if action not in ("walk", "run"):          # halki, natural harkat (over-acting nahi)
+        for key_ in ("jump", "tilt", "nod", "lean"):
+            p[key_] *= 0.75
     for key in ("lh", "rh"):
         if tgt[key] is not None:
             p[key] = lerp2(REST[key], tgt[key], k)
     return p
 
 
-def mouth_draw(pen, mc, H, ow, lw, mshape, mo, vis, d, t):
+def mouth_draw(pen, mc, H, ow, lw, mshape, mo, vis, d, t, ek=1.0):
     """Mouth ek parametric closed shape: upar/neeche lip curve + corner drop. Speaking mein vis shape (oh/ah/ee)."""
     hw, ho, cd, asym = MOUTH.get(mshape, MOUTH["flat"])
+    hw, ho, cd, asym = lerp(MOUTH["flat"][0], hw, ek), ho * ek, cd * ek, asym * ek      # halka expression
     if mo > 0.06:
         v = vis if vis in VIS_SHAPE else 2
         vhw, hmin, hg = VIS_SHAPE[v]
@@ -275,7 +282,7 @@ def mouth_draw(pen, mc, H, ow, lw, mshape, mo, vis, d, t):
         cd *= 0.7
     wob = 0.0
     if mshape == "wobble" and mo <= 0.06:
-        wob = 0.006 * math.sin(t * 18)
+        wob = 0.003 * math.sin(t * 9)
     n = 11
     xs = np.linspace(-1, 1, n)
     base = [(cd * x * x + asym * 0.011 * x * d + wob * math.sin(x * 4 + t * 10)) for x in xs]
@@ -311,10 +318,10 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     sx = sy = 1.0
     if enter < 1.0:
         e = max(0.0, 1 - enter)
-        sx, sy = 1 - 0.10 * e, 1 + 0.14 * e
+        sx, sy = 1 - 0.04 * e, 1 + 0.06 * e
     elif enter < 1.6:
         q = (enter - 1.0) / 0.6
-        sq = 0.10 * math.sin(q * math.pi) * (1 - q)
+        sq = 0.04 * math.sin(q * math.pi) * (1 - q)
         sx, sy = 1 + 0.8 * sq, 1 - sq
     bob, jump = po["bob"], po["jump"]
     lean = po["lean"]
@@ -420,8 +427,10 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
             pen.line([(hc[0] + math.cos(a) * r * 0.95, hc[1] + math.sin(a) * r * 0.95), (hc[0] + math.cos(a) * r * 1.25, hc[1] + math.sin(a) * r * 1.3)], lw * 1.2, hair_c)
     # ---- face
     brow_t, brow_l, eye_o, mshape = EMO.get(emo, EMO["neutral"])
+    ek = EXPR * ease(t / 0.35)                  # expression dheere ubharta hai, poora nahi (subtle)
+    brow_t, brow_l, eye_o = brow_t * ek, brow_l * ek, 1.0 + (eye_o - 1.0) * ek
     if action in ("shock", "scream") and t < 0.5:
-        eye_o, brow_l = max(eye_o, 1.35), max(brow_l, 0.7)
+        eye_o, brow_l = max(eye_o, 1.12), max(brow_l, 0.3)
     ey = hc[1] + 0.012 * H
     blink = 1.0
     ph = (t * 0.4 + blink_seed) % 3.2
@@ -444,12 +453,12 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     mo = float(mouth)
     if action in ("scream",):
         mo = max(mo, 0.8)
-    mouth_draw(pen, mc, H, ow, lw, mshape, mo, vis, d, t)
+    mouth_draw(pen, mc, H, ow, lw, mshape, mo, vis, d, t, ek)
     if emo in ("happy", "excited", "proud", "laughing"):
         for sgn in (-1, 1):
             c_ = (hc[0] + sgn * 0.105 * H + fxs, hc[1] + 0.058 * H)
             pen.blend_in_mask(lambda im, o, c_=c_: cv2.circle(im, (pen.P(c_)[0] - o[0], pen.P(c_)[1] - o[1]), int(0.028 * H * pen.ss * 16),
-                                                              (255, 150, 165), -1, cv2.LINE_AA, 4), 0.38, c_, 0.03 * H)
+                                                              (255, 150, 165), -1, cv2.LINE_AA, 4), 0.20, c_, 0.03 * H)
     if ch.get("glasses"):
         for sgn in (-1, 1):
             pen.ellipse((hc[0] + sgn * ex * H + fxs, ey), 0.036 * H, 0.036 * H, (70, 70, 85), fill=False, ow=lw * 0.7)
@@ -457,7 +466,7 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     if ch.get("mustache"):
         pen.ellipse((mc[0] - 0.02 * H, mc[1] - 0.030 * H), 0.03 * H, 0.012 * H, hair_c, 0)
         pen.ellipse((mc[0] + 0.02 * H, mc[1] - 0.030 * H), 0.03 * H, 0.012 * H, hair_c, 0)
-    if emo in ("scared", "worried", "cry") or action in ("shock",):
+    if emo in ("scared", "cry"):
         sx_ = hc[0] - d * r * 0.78
         sd = (t * 1.2) % 1.0 * 0.05 * H if emo == "cry" else 0.0
         pen.poly([(sx_, hc[1] - r * 0.1 + sd), (sx_ + 0.012 * H, hc[1] + r * 0.08 + sd), (sx_, hc[1] + r * 0.22 + sd), (sx_ - 0.012 * H, hc[1] + r * 0.08 + sd)], (130, 190, 240), ow * 0.3)
