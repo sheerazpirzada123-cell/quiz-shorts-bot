@@ -12,6 +12,8 @@ W, H = 1080, 1920
 STYLE = ("stylized 3D render, Unreal Engine 5 look, vibrant saturated colors, soft cinematic lighting, depth of field, "
          "clean detailed environment, vertical 9:16, no people, no characters, no text, no watermark, empty open ground in lower third")
 CACHE = "bgcache"
+TONE_WORDS = {"day": "bright daytime, clear blue sky, sunlight", "night": "nighttime, dark night sky, moonlight, lamps glowing",
+              "sunset": "golden hour sunset, warm orange sky, long soft shadows", "indoor": "indoors, interior room, warm lamp light"}
 
 
 _fails = 0
@@ -144,7 +146,7 @@ def analyze(crop, seed):
 
 def get_bg(prompt, tone, seed):
     """Returns (bg_image RGB, meta). meta: horizon (frame fraction), ls, zones, lum."""
-    img = fetch(prompt, seed)
+    img = fetch(f"{prompt}, {TONE_WORDS.get(tone, '')}", seed)      # time-of-day lafz har baar, taake din/raat na badle
     if img is None:
         print("  -> fallback procedural bg")
         img = procedural(tone, seed)
