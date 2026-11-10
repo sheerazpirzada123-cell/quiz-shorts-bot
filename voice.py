@@ -84,34 +84,68 @@ def trim(x, sr, thr=0.012):
     return x[a:b], 0.0, (b - a) / sr
 
 
-def word_times(text, dur):
-    """Words ke start/end: lambai + punctuation pause ke hisaab se estimate."""
+def _syl(w):
+    return max(1, len(re.findall(r"[aeiouy]+", re.sub(r"[^a-z]", "", w.lower()))))
+
+
+def word_times(text, dur, env=None, fps=30):
+    """Words ke start/end. env (audio energy) mile to words ko asli bolne wale hisson par rakhta hai
+    (pause/chup mein nahi), warna lambai se andaza."""
     words = text.split()
-    wts = []
-    for w in words:
-        base = max(2.0, len(re.sub(r"\W", "", w)) + 1.5)
-        if w.endswith((",", ";", ":")):
-            base += 2.5
-        if w.endswith((".", "!", "?")):
-            base += 4.5
-        wts.append(base)
+    if not words:
+        return []
+    wts = [0.45 * len(re.sub(r"\W", "", w)) + _syl(w) + 0.3 for w in words]
     tot = sum(wts)
-    out, t = [], 0.0
-    for w, k in zip(words, wts):
-        d = dur * k / tot
-        out.append((w, t, t + d))
-        t += d
-    return out
+    fr = np.concatenate([[0.0], np.cumsum(wts)]) / tot
+    if env is not None and len(env) > 4:
+        e = np.asarray(env, np.float32)
+        cum = np.concatenate([[0.0], np.cumsum(0.04 + np.clip(e, 0, 1))])
+        cum /= cum[-1]
+        tg = np.arange(len(cum)) / fps
+        bounds = np.interp(fr, cum, tg) * (dur / tg[-1])
+    else:
+        bounds = fr * dur
+    return [(w, float(bounds[i]), float(bounds[i + 1])) for i, w in enumerate(words)]
 
 
-def envelope(x, sr, fps):
+def analyze(x, sr, fps):
+    """Audio -> (env 0..1 smooth, vis int): 0 band, 1 'oh'(low formant), 2 'ah', 3 'ee'/'s'(high). Har video frame ke liye ek."""
     hop = int(sr / fps)
     n = len(x) // hop
     if n == 0:
-        return np.zeros(1, np.float32)
-    e = np.sqrt((x[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
-    e = e / (np.percentile(e, 95) + 1e-6)
-    return np.clip(e, 0, 1).astype(np.float32)
+        return np.zeros(1, np.float32), np.zeros(1, np.int8)
+    fr = x[: n * hop].reshape(n, hop)
+    rms = np.sqrt((fr ** 2).mean(axis=1))
+    e = np.clip(rms / (np.percentile(rms, 92) + 1e-6), 0, 1.2)
+    sm = np.zeros(n, np.float32)
+    for i in range(n):                      # tez khulna, thoda dheere band hona
+        prev = sm[i - 1] if i else 0.0
+        sm[i] = prev + (0.65 if e[i] > prev else 0.35) * (e[i] - prev)
+    env = np.clip(sm, 0, 1) ** 0.85
+    pad = np.concatenate([x[: n * hop], np.zeros(hop, np.float32)])
+    win = np.hanning(2 * hop).astype(np.float32)
+    fq = np.fft.rfftfreq(2 * hop, 1.0 / sr)
+    vis = np.zeros(n, np.int8)
+    for i in range(n):
+        if env[i] < 0.10:
+            continue
+        sp = np.abs(np.fft.rfft(pad[i * hop:i * hop + 2 * hop] * win))
+        if sp.sum() < 1e-3:                 # sannata (sirf smoothing ki dum) -> pichla shape rakho
+            vis[i] = vis[i - 1] if i else 0
+            continue
+        c = float((sp * fq).sum() / sp.sum())
+        vis[i] = 1 if c < 1000 else (2 if c < 2000 else 3)
+    if n > 2:                               # flicker hataane ke liye median(3)
+        m = vis.copy()
+        for i in range(1, n - 1):
+            if vis[i] and (vis[i - 1] or vis[i + 1]):
+                m[i] = int(np.median([vis[i - 1] or vis[i], vis[i], vis[i + 1] or vis[i]]))
+        vis = m
+    return env.astype(np.float32), vis
+
+
+def envelope(x, sr, fps):
+    return analyze(x, sr, fps)[0]
 
 
 def build(scenes, tmp, fps=30, gap=0.14, lead=0.35, tail=0.5):
@@ -128,8 +162,9 @@ def build(scenes, tmp, fps=30, gap=0.14, lead=0.35, tail=0.5):
         pre = lead if i == 0 else 0.0
         post = tail if i == len(scenes) - 1 else gap
         hold = pre + d + post
-        wt = [(w, pre + a, pre + b) for w, a, b in word_times(sc["text"], d)]
-        info.append(dict(start=t, hold=hold, words=wt, env=envelope(x, SR, fps), env_off=pre, voice_off=pre))
+        env, vis = analyze(x, SR, fps)
+        wt = [(w, pre + a, pre + b) for w, a, b in word_times(sc["text"], d, env, fps)]
+        info.append(dict(start=t, hold=hold, words=wt, env=env, vis=vis, env_off=pre, voice_off=pre))
         chunks.append((t + pre, x))
         t += hold
     out = np.zeros(int(t * SR) + SR, np.float32)
