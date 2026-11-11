@@ -1,4 +1,5 @@
-"""Backgrounds: Pollinations (free, key nahi) se 3D-render jaisi tasveerein; na mil sakein to code se fallback."""
+"""Scene images: Pollinations (free, key nahi) se dark-fantasy tasveerein, har scene ki apni.
+Na mil sakein to pichli image ka variation, aur wo bhi na ho to code se banaya dark moonlit fallback."""
 import hashlib
 import os
 import time
@@ -9,155 +10,114 @@ import numpy as np
 import requests
 
 W, H = 1080, 1920
-STYLE = ("ultra realistic photograph, real location, shot on 35mm lens at human eye level, natural lighting, sharp detail, "
-         "realistic textures, straight-on view, clearly visible horizon, wide flat empty ground or floor across the lower half, "
-         "vertical 9:16, absolutely no people, no humans, no crowd, no characters, no text, no watermark")
+STYLE = ("cinematic dark fantasy mystery, dramatic chiaroscuro lighting, volumetric fog, deep black shadows, moody teal and amber color palette, "
+         "highly detailed digital painting, epic composition, vertical 9:16 frame, no text, no letters, no watermark, no logo")
 CACHE = "bgcache"
-TONE_WORDS = {"day": "bright daytime, clear blue sky, sunlight", "night": "nighttime, dark night sky, moonlight, lamps glowing",
-              "sunset": "golden hour sunset, warm orange sky, long soft shadows", "indoor": "indoors, interior room, warm lamp light"}
+IMG_BUDGET = float(os.environ.get("IMG_BUDGET_SEC", "900"))     # itne seconds ke baad naye images mangna band (fallback use hoga)
+_fails, _t0, _last = 0, None, None
 
 
-_fails = 0
-
-
-def fetch(prompt, seed, tries=2):
-    global _fails
-    if _fails >= 2:      # Pollinations down hai -> baaqi scenes mein waqt zaya nahi
+def fetch(prompt, seed, tries=3):
+    global _fails, _t0
+    if os.environ.get("BG_OFFLINE") or _fails >= 3:      # Pollinations down hai -> baaqi scenes mein waqt zaya nahi
         return None
-    if os.environ.get("BG_OFFLINE"):
+    _t0 = _t0 or time.time()
+    if time.time() - _t0 > IMG_BUDGET:
         return None
     os.makedirs(CACHE, exist_ok=True)
     key = hashlib.md5(f"{prompt}{seed}".encode()).hexdigest()[:12]
     path = os.path.join(CACHE, key + ".jpg")
     if os.path.exists(path):
-        return cv2.imread(path)
-    q = urllib.parse.quote(f"{prompt}, {STYLE}")
+        img = cv2.imread(path)
+        if img is not None:
+            return img
+    q = urllib.parse.quote(f"{prompt[:600]}, {STYLE}")
     for k in range(tries):
         url = (f"https://image.pollinations.ai/prompt/{q}?width=768&height=1344&seed={seed + k * 17}"
                f"&model=flux&nologo=true&enhance=false")
         try:
-            r = requests.get(url, timeout=60)
+            r = requests.get(url, timeout=75)
             if r.status_code == 200 and len(r.content) > 20000:
                 img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
                 if img is not None and img.shape[0] > 400:
                     cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
                     _fails = 0
                     return img
+            elif r.status_code == 429:                   # rate limit -> thoda ruk kar dobara
+                time.sleep(12 * (k + 1))
+                continue
         except Exception as e:
-            print("  bg fetch err:", str(e)[:80])
-        time.sleep(3)
+            print("  img fetch err:", str(e)[:80])
+        time.sleep(4)
     _fails += 1
     return None
 
 
-def procedural(tone, seed):
-    """Fallback: soft 3D jaisa gradient sky + door pahaadiyan + zameen (RGB banake BGR return)."""
+def procedural(seed):
+    """Fallback: code se dark moonlit scene (chand, dhund, kaali pahaadiyan). BGR return."""
     rnd = np.random.RandomState(seed)
-    pal = {"day": ((70, 140, 235), (190, 225, 250), (86, 150, 70)), "night": ((14, 18, 55), (60, 70, 130), (30, 46, 60)),
-           "sunset": ((70, 70, 150), (250, 170, 110), (80, 90, 60)), "indoor": ((150, 120, 100), (205, 180, 150), (120, 85, 60))}
-    top, hor, gr = pal.get(tone, pal["day"])
-    img = np.zeros((H, W, 3), np.float32)
-    hy = int(H * 0.55)
-    for y in range(hy):
-        k = (y / hy) ** 1.3
-        img[y] = np.array(top) * (1 - k) + np.array(hor) * k
-    for y in range(hy, H):
-        k = (y - hy) / (H - hy)
-        img[y] = np.array(gr) * (0.85 + 0.25 * k) + np.array(hor) * 0.15 * (1 - k)
-    for layer in range(3):
-        base = hy - 40 * (3 - layer)
-        xs = np.arange(W)
-        prof = base - (60 + 40 * layer) * (0.5 + 0.5 * np.sin(xs / (180 - layer * 40) + rnd.rand() * 6)) - 25 * np.sin(xs / 61 + layer)
-        shade = np.array(gr) * (0.55 + 0.15 * layer)
-        for x in range(0, W):
-            y0 = int(prof[x])
-            img[y0:hy + 6, x] = shade * 0.8 + np.array(hor) * 0.2 * (1 - layer / 3)
-    if tone in ("day", "sunset"):
-        for _ in range(4):
-            cx, cy = rnd.randint(100, W - 100), rnd.randint(150, hy - 250)
-            for _ in range(7):
-                cv2.circle(img, (cx + rnd.randint(-110, 110), cy + rnd.randint(-25, 25)), rnd.randint(40, 85), (250, 250, 255), -1)
-        img = cv2.GaussianBlur(img, (0, 0), 9)
-    elif tone == "night":
-        for _ in range(90):
-            cv2.circle(img, (rnd.randint(0, W), rnd.randint(0, hy - 200)), rnd.randint(1, 3), (255, 255, 235), -1)
-        cv2.circle(img, (780, 330), 70, (240, 240, 225), -1)
-    img = cv2.GaussianBlur(img, (0, 0), 2.0)
+    top = np.array([8, 10, 28], np.float32)
+    hor = np.array([55, 78, 108], np.float32) + rnd.randint(-10, 25, 3)
+    hy = int(H * rnd.uniform(0.50, 0.62))
+    yy = np.arange(H, dtype=np.float32)[:, None]
+    k = np.clip(yy / hy, 0, 1) ** 1.4
+    img = (top[None, None, :] * (1 - k[..., None]) + hor[None, None, :] * k[..., None]) * np.ones((H, W, 3), np.float32)
+    mx, my = int(rnd.randint(260, 820)), int(rnd.randint(260, 620))
+    glow = np.zeros((H, W), np.float32)
+    cv2.circle(glow, (mx, my), 95, 1.0, -1, cv2.LINE_AA)
+    img += cv2.GaussianBlur(glow, (0, 0), 70)[..., None] * np.array([90, 110, 130], np.float32)
+    cv2.circle(img, (mx, my), 80, (228, 228, 214), -1, cv2.LINE_AA)
+    xs = np.arange(W, dtype=np.float32)
+    for layer in range(3):                                # door se paas: halki -> gehri pahaadiyan
+        prof = hy - (170 - layer * 40) * (0.5 + 0.5 * np.sin(xs / (150 - layer * 30) + rnd.rand() * 6)) - 35 * np.sin(xs / 47 + layer * 2) + layer * 70
+        shade = np.array([34, 46, 66], np.float32) * (1 - 0.32 * layer)
+        img[yy >= prof[None, :]] = shade
+    fog = cv2.resize(cv2.GaussianBlur(rnd.rand(H // 8, W // 8).astype(np.float32), (0, 0), 5), (W, H), interpolation=cv2.INTER_CUBIC)
+    img += 30 * fog[..., None] * np.array([0.6, 0.8, 1.0], np.float32)
+    img = cv2.GaussianBlur(img, (0, 0), 1.5)
     return np.clip(img[..., ::-1], 0, 255).astype(np.uint8)
 
 
-TONE_GRADE = {   # (shadow tint BGR->RGB below, highlight tint, saturation, contrast)
-    "day": ((0.96, 1.0, 1.06), (1.04, 1.01, 0.97), 1.04, 1.04),
-    "night": ((0.85, 0.94, 1.18), (0.94, 1.0, 1.12), 1.03, 1.08),
-    "sunset": ((0.93, 0.94, 1.08), (1.10, 1.0, 0.88), 1.08, 1.06),
-    "indoor": ((0.97, 0.97, 1.03), (1.07, 1.02, 0.93), 1.04, 1.04),
-}
+def variation(img, seed):
+    """Image na mile to pichli image ka alag crop (zoom + kabhi flip) taake scene dikhne mein alag lage."""
+    v = cv2.flip(img, 1) if seed % 2 else img
+    h, w = v.shape[:2]
+    z = 1.15 + 0.10 * (seed % 3)
+    ch, cw = int(h / z), int(w / z)
+    y0 = int((h - ch) * (0.2 + 0.6 * ((seed // 3) % 3) / 2))
+    x0 = int((w - cw) * (0.2 + 0.6 * ((seed // 7) % 3) / 2))
+    return v[y0:y0 + ch, x0:x0 + cw]
 
 
-def grade(img, tone):
-    """Cinematic grade (ek baar per scene): local contrast, S-curve, saturation, teal/orange tint, centre pop."""
-    sh, hi, sat, con = TONE_GRADE.get(tone, TONE_GRADE["day"])
+def grade(img):
+    """Dark cinematic grade (BGR): local contrast, thodi desaturation, gehre shadows (teal), garam highlights (amber)."""
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    lab[..., 0] = cv2.createCLAHE(clipLimit=1.1, tileGridSize=(6, 8)).apply(lab[..., 0])
+    lab[..., 0] = cv2.createCLAHE(clipLimit=1.4, tileGridSize=(6, 8)).apply(lab[..., 0])
     f = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype(np.float32) / 255.0
     g = f.mean(axis=2, keepdims=True)
-    f = g + (f - g) * sat
-    f = 0.5 + (f - 0.5) * con
-    f = f + 0.12 * np.sin(np.clip(f, 0, 1) * np.pi) * (f - 0.5)            # soft S-curve
-    L = np.clip(f.mean(axis=2, keepdims=True), 0, 1)
-    shr, hir = np.array(sh[::-1], np.float32), np.array(hi[::-1], np.float32)    # RGB -> BGR
-    f = f * (1 + (shr - 1) * (1 - L) * 0.9) * (1 + (hir - 1) * L * 0.9)
-    h, w = f.shape[:2]
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    pool = np.exp(-(((xx - w / 2) / (w * 0.55)) ** 2 + ((yy - h * 0.72) / (h * 0.30)) ** 2))   # zameen par halka roshni ka daayra
-    f = f * (0.94 + 0.12 * pool[..., None])
+    f = g + (f - g) * 0.92
+    f = 0.5 + (f - 0.5) * 1.10
+    f = np.clip(f, 0, 1) ** 1.15
+    L = f.mean(axis=2, keepdims=True)
+    sh = np.array([1.10, 1.02, 0.90], np.float32)         # BGR: shadows mein blue/teal
+    hi = np.array([0.92, 1.01, 1.08], np.float32)         # highlights mein warm amber
+    f = f * (1 + (sh - 1) * (1 - L) * 0.9) * (1 + (hi - 1) * L * 0.9)
     return np.clip(f * 255, 0, 255).astype(np.uint8)
 
 
-def find_horizon(crop):
-    """Frame mein zameen/aasmaan ki line (0..1). Row-average rang mein sabse bada badlaav (0.38-0.74 ke beech)."""
-    sm = cv2.resize(crop, (108, 192), interpolation=cv2.INTER_AREA).astype(np.float32)[:, 12:96].mean(axis=1)
-    sm = np.stack([np.convolve(np.pad(sm[:, c], 3, mode="edge"), np.ones(5) / 5, mode="valid")[:192] for c in range(3)], axis=1)
-    k = 6
-    diff = np.abs(sm[2 * k:] - sm[:-2 * k]).sum(axis=1)                     # index i <-> row i + k
-    ys = (np.arange(len(diff)) + k) / 192.0
-    score = diff * (1 - 0.9 * np.abs(ys - 0.56))
-    ok = (ys > 0.38) & (ys < 0.74)
-    if not ok.any() or diff[ok].max() < 22:
-        return 0.54            # eye-level photo: horizon aam taur par frame ke beech ke aas-paas
-    return float(ys[ok][np.argmax(score[ok])])
-
-
-def analyze(crop, seed):
-    """Frame-size crop se: horizon, light ki taraf (ls: +1 daayen se), teen hisson ka zameen-rang + roshni."""
-    hy = find_horizon(crop)
-    g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    up = g[: int(H * 0.5)]
-    l, r = up[:, : W // 2].mean(), up[:, W // 2:].mean()
-    ls = 1 if r > l else -1
-    if abs(r - l) < 0.04 * max(l, r, 1):
-        ls = 1 if seed % 2 else -1
-    y0, y1 = int(min(0.9, hy + 0.04) * H), int(0.97 * H)
-    zones = []
-    for i in range(3):
-        z = crop[y0:y1, i * W // 3:(i + 1) * W // 3].reshape(-1, 3).mean(axis=0)[::-1]    # RGB
-        zones.append(tuple(float(v) for v in z))
-    return dict(horizon=hy, ls=ls, zones=zones, lum=float(g.mean() / 255.0))
-
-
-def get_bg(prompt, tone, seed):
-    """Returns (bg_image RGB, meta). meta: horizon (frame fraction), ls, zones, lum."""
-    img = fetch(f"{prompt}, {TONE_WORDS.get(tone, '')}", seed)      # time-of-day lafz har baar, taake din/raat na badle
-    if img is None:
-        print("  -> fallback procedural bg")
-        img = procedural(tone, seed)
-    # cover-resize to slightly larger than frame so camera can move
+def get_bg(prompt, seed):
+    """Returns RGB image (frame se ~1.22x bada, taake camera zoom/pan/shake kar sake)."""
+    global _last
+    img = fetch(prompt, seed)
+    if img is not None:
+        _last = img
+    elif _last is not None:
+        print("  -> pichli image ka variation", flush=True)
+        img = variation(_last, seed)
+    else:
+        print("  -> fallback procedural bg", flush=True)
+        img = procedural(seed)
     h, w = img.shape[:2]
     s = max(W * 1.22 / w, H * 1.22 / h)
     img = cv2.resize(img, (int(w * s), int(h * s)), interpolation=cv2.INTER_CUBIC)
-    img = grade(img, tone)
-    bh, bw = img.shape[:2]
-    oy, ox = (bh - H) // 2, (bw - W) // 2
-    meta = analyze(img[oy:oy + H, ox:ox + W], seed)
-    print(f"  bg: horizon={meta['horizon']:.2f} light={'right' if meta['ls'] > 0 else 'left'}", flush=True)
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB), meta      # RGB (ffmpeg rgb24 + characters RGB)
+    return cv2.cvtColor(grade(img), cv2.COLOR_BGR2RGB)
