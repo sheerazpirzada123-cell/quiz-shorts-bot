@@ -1,4 +1,4 @@
-name: Daily Story Short
+name: Daily Dark Story Short
 
 on:
   schedule:
@@ -27,7 +27,7 @@ env:
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Random wait (sirf scheduled run par)
         if: github.event_name == 'schedule'
@@ -70,15 +70,19 @@ jobs:
           path: ~/.cache/huggingface
           key: kokoro-82m-v1
 
-      - name: Generate script (Gemini)
+      - name: Generate dark story script (Gemini)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python story_gen.py
 
       - name: Render video
-        timeout-minutes: 30
+        timeout-minutes: 45
         env:
           MUSIC_MODE: synth
+          KOKORO_VOICE: bm_george        # gehri dramatic awaaz (am_adam / am_michael bhi chal jaati hain)
+          EDGE_VOICE: en-GB-RyanNeural   # Kokoro fail ho to backup awaaz
+          VOICE_SPEED: "0.98"            # thodi dheemi = mysterious; video 45-60s se bahar jaye to 1.0-1.08 try karo
+          IMG_BUDGET_SEC: "600"          # images ke liye max 10 min, baaki scenes fallback se
         run: |
           fc-cache -f
           python render_story.py
@@ -99,6 +103,7 @@ jobs:
           path: |
             output.mp4
             script.json
+            story_plan.md
           retention-days: 2
           if-no-files-found: ignore
 
