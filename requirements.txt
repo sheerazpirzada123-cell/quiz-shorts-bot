@@ -1,0 +1,11 @@
+requests
+Pillow
+numpy
+opencv-python-headless
+soundfile
+kokoro>=0.9.4
+edge-tts
+google-api-python-client
+google-auth
+google-auth-httplib2
+transformers>=4.45          # Depth Anything V2 Small (depth.py); torch workflow mein alag se CPU wheel se lagta hai
