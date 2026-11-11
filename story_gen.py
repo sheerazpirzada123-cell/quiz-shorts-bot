@@ -1,192 +1,3 @@
-"""Gemini se NAYI dark-fantasy / mystery story (twist ke saath): HOOK -> BODY -> TWIST & OUTRO.
-Har scene ke saath: narration, animation cue (camera/transition/highlight word/sfx) aur image prompt.
-Output: script.json (video ke liye) + story_plan.md (padhne wala plan, tumhare format mein)."""
-import datetime
-import json
-import os
-import random
-import re
-import sys
-import time
-
-import requests
-
-API_KEY = os.environ.get("GEMINI_API_KEY")
-MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"] if m]
-HISTORY, OUT, PLAN = "history.json", "script.json", "story_plan.md"
-
-# Har run mein random ingredients -> har baar alag setup (Gemini inhe twist karke use karta hai, copy nahi)
-SETTINGS = [
-    "two neighbours with opposite attitudes toward money", "a poor student and a rich student competing for one scholarship",
-    "a small family business competing with a luxury corporation", "two friends who make very different life choices",
-    "a wealthy man who loses everything and a worker who helps him", "a village where people are judged by their clothes",
-    "a shopkeeper who treats rich and poor customers differently", "two siblings who inherit unequal amounts of money",
-    "a hardworking cleaner whose idea changes an entire company", "a rich child and a poor child swapping daily routines",
-    "a street vendor who teaches a millionaire the value of kindness", "two people given the same opportunity with different outcomes",
-    "a boss who ignores quiet workers until a crisis", "a family choosing between status and happiness",
-    "a student who is mocked for being poor but changes the school", "a man who spends to impress others and a woman who saves quietly",
-    "a community divided by wealth until one unexpected event", "a successful person who forgets the people who helped",
-    "a generous stranger whose identity is revealed at the end", "two workers with opposite ideas about success",
-    "a person who values time more than money", "a wealthy landlord and a tenant who helps him in an emergency",
-]
-HEROES = [
-    "a humble young worker in simple everyday clothes", "a wealthy but lonely business owner in a tailored suit",
-    "a hardworking single parent", "a clever student with worn school clothes and a bright expression",
-    "a confident shopkeeper", "a quiet cleaner who notices everything", "a kind street vendor",
-    "a proud executive who thinks money solves every problem", "two friends from very different backgrounds",
-    "a retired teacher who lives simply", "a young delivery rider with big ambitions",
-    "a family struggling to keep its small shop open", "a rich teenager who has never done chores",
-]
-TWISTS = [
-    "the person everyone underestimated is the one who saves the day",
-    "the wealthy character discovers that the poorest person has the richest relationships",
-    "the apparent failure was quietly building something meaningful",
-    "the person who gave the least money gave the greatest help",
-    "the rich character learns that respect cannot be bought",
-    "the person judged by appearance turns out to own the solution",
-    "the smallest act of kindness returns when it is needed most",
-    "the character chasing luxury loses the one thing money cannot replace",
-    "the worker everyone ignored becomes the person the company depends on",
-    "both characters receive the same reward but value it differently",
-    "the person who seemed lucky had made years of unseen sacrifices",
-    "the final choice reveals who was truly wealthy all along",
-]
-ANIMS = ["zoom_in", "zoom_out", "slow_zoom_out", "push_in", "pan_left", "pan_right", "shake", "drift"]
-TRANS = ["cut", "flash", "fade", "glitch"]
-SECTIONS = ["HOOK", "BODY", "TWIST"]
-SFX = ["none", "whoosh", "thud", "rise", "gasp", "knock", "sparkle", "alarm", "buzz", "scratch", "gulp"]
-MOODS = ["mysterious", "epic"]
-
-RULES = """You are an autonomous viral YouTube Shorts story creator. Write ONE original, emotionally engaging
-2D-cartoon moral/social story in the spirit of popular rich-vs-poor, kindness, life lessons, money habits,
-respect, family, education, opportunity and human psychology stories. Every run must use a genuinely new
-topic and story premise. English only, simple spoken words, strong emotional contrast, satisfying reveal,
-and a clear takeaway shown through events (never preachy). One deep male narrator.
-
-TOTAL: 125-150 spoken words, about 55 seconds. 20-24 scenes. Each scene has one short narration line.
-HOOK (1-2 scenes): instantly intriguing, specific contrast or dilemma.
-BODY (about 15-17 scenes): clear actions, escalating stakes, expressive character reactions and concrete details.
-TWIST/OUTRO (3-4 scenes): unexpected but believable emotional payoff and memorable closing line.
-
-PER-SCENE CUES:
-- text: exact narration, short and visual.
-- section: HOOK | BODY | TWIST.
-- visual: detailed image prompt (35-60 words) describing a SINGLE illustrated story moment, action, camera angle,
-  environment, lighting, and the characters' visible full-body pose and facial expression.
-  Characters MUST be consistent throughout the film: cute stylized chibi 2D humans with oversized rounded heads,
-  compact but fully formed bodies, visible neck, shoulders, torso, arms, hands, legs and feet; not stick figures,
-  not geometric mannequins, not photorealistic. Use expressive large eyes, eyebrows and mouth, clean bold dark outlines,
-  softly shaded skin, visible face shadows/highlights, clothing folds, cast shadows, warm rim light and dimensional
-  cel shading. Show body language clearly (walking, pointing, carrying, sitting, turning, reacting, embracing).
-  Compose like a polished hand-drawn 2D moral-story cartoon, vertical 9:16. No text, letters, logos or watermark.
-- anim: zoom_in | zoom_out | slow_zoom_out | push_in | pan_left | pan_right | shake | drift. Vary them.
-- transition: cut | flash | fade | glitch. Mostly cut.
-- emph: 1-2 key words from narration (empty for HOOK).
-- sfx: none | whoosh | thud | rise | gasp | knock | sparkle | alarm | buzz | scratch | gulp.
-STYLE ANCHOR: one sentence (max 35 words) locking the same character proportions, face design, clothing,
-bold outlines, warm palette, cel shading and lighting for all scenes.
-TITLE: 35-65 characters. DESCRIPTION: one hook sentence + 3-5 hashtags. TAGS: 6-10 short tags.
-TOPIC: one short, specific premise used for permanent repeat avoidance. music_mood: mysterious or epic.
-Return JSON only."""
-
-
-def schema():
-    S = lambda **k: {"type": "STRING", **k}
-    sc = {"type": "OBJECT", "properties": {"text": S(), "section": S(enum=SECTIONS), "visual": S(), "anim": S(enum=ANIMS),
-          "transition": S(enum=TRANS), "emph": S(), "sfx": S(enum=SFX)},
-          "required": ["text", "section", "visual", "anim", "transition", "emph", "sfx"]}
-    return {"type": "OBJECT", "properties": {"topic": S(), "title": S(), "description": S(), "tags": {"type": "ARRAY", "items": S()},
-            "music_mood": S(enum=MOODS), "style_anchor": S(), "scenes": {"type": "ARRAY", "items": sc}},
-            "required": ["topic", "title", "description", "tags", "music_mood", "style_anchor", "scenes"]}
-
-
-def ask(prompt, sch, max_out=8000, think=1024):
-    last = None
-    for model in MODELS:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        cfg = {"temperature": 1.0, "maxOutputTokens": max_out, "responseMimeType": "application/json", "responseSchema": sch}
-        if "2.5-flash" in model:
-            cfg["thinkingConfig"] = {"thinkingBudget": think}
-            cfg["maxOutputTokens"] = max_out + think
-        for attempt in range(3):
-            try:
-                r = requests.post(url, headers={"x-goog-api-key": API_KEY}, json={"contents": [{"parts": [{"text": prompt}]}],
-                                  "generationConfig": cfg}, timeout=240)
-                if r.status_code == 200:
-                    cands = r.json().get("candidates") or []
-                    parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
-                    txt = "".join(p.get("text", "") for p in parts).strip()
-                    if not txt:
-                        last = f"{model}: empty answer (blocked or cut off)"
-                        continue
-                    return json.loads(re.sub(r"^```(?:json)?|```$", "", txt, flags=re.M).strip())
-                last = f"{model}: HTTP {r.status_code} {r.text[:160]}"
-                if r.status_code in (400, 401, 403, 404):    # retry se theek nahi hoga -> seedha agla model
-                    break
-                time.sleep(20 if r.status_code == 429 else 5 * (attempt + 1))
-            except Exception as e:
-                last = f"{model}: {e}"
-                time.sleep(4)
-    raise RuntimeError(last)
-
-
-def _words(s):
-    return {re.sub(r"(ed|s)$", "", w) for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 3}
-
-
-def too_similar(topic, past, thr=0.4):
-    """Same story ko naye alfaaz mein dobara na banaye (sirf exact match nahi, overlap bhi dekhta hai)."""
-    a = _words(topic)
-    if not a:
-        return False
-    for p in past:
-        b = _words(p)
-        if b and len(a & b) / len(a | b) >= thr:
-            return True
-    return False
-
-
-def load_history():
-    try:
-        return json.load(open(HISTORY, encoding="utf-8"))
-    except Exception:
-        return []
-
-
-def _tok(w):
-    return re.sub(r"[^a-z0-9']", "", w.lower())
-
-
-def finalize(d):
-    """Sections ki tarteeb, default cues, aur fixed cues: pehla scene zoom-in+flash, twist flash se shuru, aakhri scene slow zoom-out."""
-    sc = d["scenes"]
-    order = [SECTIONS.index(s["section"]) if s.get("section") in SECTIONS else -1 for s in sc]
-    ok = (min(order) >= 0 and order == sorted(order) and order.count(0) >= 1 and order.count(2) >= 2)
-    if not ok:                                              # model ki tarteeb galat -> position se: pehle 2 HOOK, aakhri 4 TWIST
-        n = len(sc)
-        for k, s in enumerate(sc):
-            s["section"] = "HOOK" if k < 2 else ("TWIST" if k >= n - 4 else "BODY")
-    body_cycle = ["push_in", "pan_left", "zoom_in", "drift", "pan_right", "push_in"]
-    for k, s in enumerate(sc):
-        if s.get("anim") not in ANIMS:
-            s["anim"] = "zoom_in" if s["section"] == "HOOK" else body_cycle[k % len(body_cycle)]
-        if s.get("transition") not in TRANS:
-            s["transition"] = "cut"
-        if s.get("sfx") not in SFX:
-            s["sfx"] = "none"
-        s["visual"] = re.sub(r"\s+", " ", s.get("visual") or "").strip() or f"dark fantasy cinematic scene, {s['text']}"
-        toks = {_tok(w) for w in s["text"].split()}
-        em = [w for w in re.findall(r"[A-Za-z0-9']+", s.get("emph") or "") if _tok(w) in toks][:2]
-        s["emph"] = "" if s["section"] == "HOOK" else " ".join(em)
-    sc[0]["anim"], sc[0]["transition"] = "zoom_in", "flash"
-    first_twist = next(k for k, s in enumerate(sc) if s["section"] == "TWIST")
-    sc[first_twist]["transition"] = "flash"
-    sc[-1]["anim"] = "slow_zoom_out"
-    d["style_anchor"] = re.sub(r"\s+", " ", d.get("style_anchor") or "").strip() or "cinematic dark fantasy, teal and amber palette, volumetric fog, lone hooded traveller"
-    if d.get("music_mood") not in MOODS:
-        d["music_mood"] = "mysterious"
-    return d
-
 
 def clean(d):
     for s in d["scenes"]:
@@ -275,11 +86,16 @@ def main():
     recent = [h.get("topic", "") for h in hist]
     d, fb = None, False
     rejected = []
+    last_validation_error = ""
     if API_KEY:
         for attempt in range(4):
             seeds = (f"Inspiration (twist it into something fresh, do not copy literally): setting = {random.choice(SETTINGS)}; "
                      f"hero = {random.choice(HEROES)}; twist type = {random.choice(TWISTS)}.")
-            prompt = (f"{RULES}\n\n{seeds}\nDo NOT repeat or closely resemble any of these past stories: {recent[-60:] + rejected}\nJSON only.")
+            prompt = (f"{RULES}\n\n{seeds}\nDo NOT repeat or closely resemble any of these past stories: {recent[-60:] + rejected}\n"
+                      f"STRICT REMINDER: 18-22 scenes, exactly 5-7 spoken words per scene, and 115-155 words total. "
+                      f"The local validator rejects anything outside 16-28 scenes and 105-175 words. "
+                      f"{('Your previous response failed: ' + last_validation_error + '. Correct the length now; do not repeat that mistake. ') if last_validation_error else ''}"
+                      "Return JSON only.")
             try:
                 cand = clean(ask(prompt, schema()))
                 if too_similar(cand["topic"] + " " + cand["title"], recent):
@@ -289,6 +105,7 @@ def main():
                 d = cand
                 break
             except Exception as e:
+                last_validation_error = str(e)
                 print(f"story attempt {attempt + 1} failed: {e}")
                 time.sleep(3)
     if not d:
