@@ -1,36 +1,118 @@
-name: Daily Quiz Shorts Bot Execution
+name: Daily Parable Short
 
 on:
   schedule:
-    - cron: '0 10 * * *'
+    - cron: "0 4 * * *"
+    - cron: "0 13 * * *"
   workflow_dispatch:
+    inputs:
+      upload:
+        description: "YouTube par upload karna hai? Band karo to sirf test hoga (video artifact mein milegi)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:                 # do runs ek saath na chalein (history.json push conflict se bachne ke liye)
+  group: shorts-bot
+  cancel-in-progress: false
+
+env:
+  # Pehle 240 min tak sleep hota tha = har run ke runner minutes zaya (private repo par 2000 free min/month hi hote hain).
+  # GitHub cron khud bhi kuch minute late hota hai, isliye 15 min ka jitter kaafi hai.
+  MAX_DELAY_MIN: "15"
+  DO_UPLOAD: ${{ (github.event_name == 'workflow_dispatch' && inputs.upload == false) && 'false' || 'true' }}
 
 jobs:
-  build-and-render:
+  build-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Cache PyTorch & MiDaS Models
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/torch/hub/
-          key: ${{ runner.os }}-torch-midas-v1
-
-      - name: Install Dependencies
+      - name: Random wait (sirf scheduled run par)
+        if: github.event_name == 'schedule'
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          DELAY=$(shuf -i 0-$((MAX_DELAY_MIN * 60)) -n 1)
+          echo "Sleeping $((DELAY / 60)) min $((DELAY % 60)) sec before generating and posting"
+          sleep "$DELAY"
 
-      - name: Run Short Pipeline & Render Video
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
+          YT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
-          python main.py
+          [ -n "$GEMINI_API_KEY" ] || { echo "::error::GEMINI_API_KEY secret missing"; exit 1; }
+          if [ "$DO_UPLOAD" = "true" ]; then
+            [ -n "$YT_ID" ] && [ -n "$YT_SECRET" ] && [ -n "$YT_REFRESH" ] || { echo "::error::YouTube secret(s) missing"; exit 1; }
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core   # caption font repo ke fonts/ folder mein hai
+
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Cache Kokoro voice + Depth Anything V2 Small model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kokoro-82m-depthanything-v2-small-v1
+
+      - name: Generate parable story script (Gemini)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python story_gen.py
+
+      - name: Render video (45 min se kam)
+        timeout-minutes: 45
+        env:
+          MUSIC_MODE: synth
+          KOKORO_VOICE: am_michael       # gehri calm narrator awaaz (am_adam / bm_george bhi chal jaati hain)
+          EDGE_VOICE: en-US-GuyNeural    # Kokoro fail ho to backup awaaz
+          VOICE_SPEED: "1.0"             # video 60-80s ki banti hai; bahar jaye to 0.95-1.1 try karo
+          IMG_BUDGET_SEC: "600"          # images ke liye max 10 min, baaki scenes fallback se
+          DEPTH_MODEL: depth-anything/Depth-Anything-V2-Small-hf   # CPU par ~1-3 s/image, har location par sirf ek baar; fail ho to synthetic depth
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: |
+          fc-cache -f
+          python render_story.py
+
+      - name: Upload to YouTube
+        if: env.DO_UPLOAD == 'true'
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python main.py
+
+      - name: Keep video as artifact (manual runs only)
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: |
+            output.mp4
+            script.json
+            story_plan.md
+          retention-days: 2
+          if-no-files-found: ignore
+
+      - name: Save topic history
+        if: env.DO_UPLOAD == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.json
+          git diff --cached --quiet || (git commit -m "update topic history" && git pull --rebase && git push)
