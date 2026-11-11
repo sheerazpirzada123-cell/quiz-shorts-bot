@@ -1,294 +1,409 @@
-"""Gemini se NAYI dark-fantasy / mystery story (twist ke saath): HOOK -> BODY -> TWIST & OUTRO.
-Har scene ke saath: narration, animation cue (camera/transition/highlight word/sfx) aur image prompt.
-Output: script.json (video ke liye) + story_plan.md (padhne wala plan, tumhare format mein)."""
-import datetime
+"""script.json -> output.mp4 (Short 1080x1920, 30fps): dark fantasy / mystery story.
+Har scene = ek AI image + camera cue (zoom/shake/pan) + transition (flash/glitch/fade/cut) + word-by-word subtitles (yellow/white, dark box)
++ kinetic text (hook shake, key words) + aakhir mein dramatic vignette, slow zoom-out aur subscribe pop-up."""
+import bisect
+import faulthandler
 import json
+import math
 import os
-import random
-import re
+import subprocess
 import sys
+import tempfile
 import time
+import zlib
 
-import requests
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
-API_KEY = os.environ.get("GEMINI_API_KEY")
-MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"] if m]
-HISTORY, OUT, PLAN = "history.json", "script.json", "story_plan.md"
+import bgimg
+import music
+import voice
 
-# Har run mein random ingredients -> har baar alag setup (Gemini inhe twist karke use karta hai, copy nahi)
-SETTINGS = [
-    "a lighthouse on a cliff", "a library that rearranges itself at night", "a drowned city under a black lake", "a monastery in endless snow",
-    "a mirror-maze at an abandoned fair", "a forest where the trees whisper names", "a clockmaker's tower where time runs backwards",
-    "a desert caravan following a falling star", "a castle with one door that never opens", "an island that appears only at low tide",
-    "a village where nobody casts a shadow", "a train that stops at stations that don't exist", "a witch's market sold only at midnight",
-    "a cave of glowing crystals that hum", "a ship sailing through a sea of fog", "a graveyard with one fresh unnamed grave",
-    "a bell tower that rings thirteen times", "a painter's studio where portraits blink", "a frozen lake with something moving beneath",
-    "an old well that answers questions", "a labyrinth beneath a royal palace", "a lantern festival in a dying kingdom",
-]
-HEROES = [
-    "a young cartographer", "a retired knight", "a lonely lighthouse keeper", "a thief with a stolen map", "an orphan apprentice",
-    "a night watchman", "a travelling storyteller", "a blind bell-ringer", "a curious librarian", "a runaway princess",
-    "a grave-digger's daughter", "a disgraced alchemist", "a ferryman", "a monster hunter who has never seen a monster",
-]
-TWISTS = [
-    "the hero was the monster all along", "the hero has been dead since the first scene", "the villain is the hero's future self",
-    "the monster was protecting everyone from something worse", "the prize everyone wants IS the curse", "the story is a loop and the hero is on lap 1000",
-    "the narrator is the one who is trapped", "the helper character is the real villain", "the place is not a place - it is a living creature",
-    "the hero's rescue mission is what caused the disaster", "the warning sign was written by the hero himself", "everything the hero feared was a lie told to keep him in place",
-    "the thing being hunted is actually lost and scared", "the hero finds his own name already carved in the final room",
-]
-ANIMS = ["zoom_in", "zoom_out", "slow_zoom_out", "push_in", "pan_left", "pan_right", "shake", "drift"]
-TRANS = ["cut", "flash", "fade", "glitch"]
-SECTIONS = ["HOOK", "BODY", "TWIST"]
-SFX = ["none", "whoosh", "thud", "rise", "gasp", "knock", "sparkle", "alarm", "buzz", "scratch", "gulp"]
-MOODS = ["mysterious", "epic"]
-
-RULES = """You are an autonomous viral video creator for YouTube Shorts and Reels. You write ONE completely unique, highly engaging
-ORIGINAL fictional story with a twist (cinematic dark fantasy / mystery), plus exact animation, voice-over and image cues for each scene.
-Never repeat a past story setup. English only, dramatic, fast, mysterious, atmospheric. It is narrated by ONE deep male narrator.
-
-TOTAL: 125-150 spoken words (about 55 seconds). 20-24 scenes. Every scene = ONE short narration line of 5-9 words (scene changes every 2-3 seconds).
-Short punchy sentences, simple spoken words, zero fluff, no filler, no lectures, no moral. Present or past tense - stay consistent.
-BANNED phrases: "Did you know", "Imagine", "In this video", "Let's dive in", "Hey guys", "Once upon a time", "Little did he know".
-
-STRUCTURE (set `section` on every scene, in this order):
-1. HOOK (1-2 scenes, <=5 seconds, <=10 words total in the first scene): an EXTREME curiosity hook - a bold, specific, impossible-sounding claim or question
-   that the viewer must see resolved. e.g. "Every night, the lighthouse never guided a single ship."
-2. BODY (about 15-17 scenes): fast-paced storytelling that BUILDS TENSION. Rule of three escalation. One open loop around the middle ("But the door was already open.").
-   One concrete detail every scene (an object, a sound, a number, a rule). A hero with a clear want, an obstacle that escalates, a creeping wrong feeling.
-3. TWIST (3-4 scenes, the last ~12 seconds): the unexpected resolution viewers did not see coming - it must RE-EXPLAIN something from the hook or body.
-   The LAST line is a strong, quotable closing line that can loop back to the hook.
-
-PER-SCENE CUES (all required):
- - text: the narration line (exactly what is spoken, and shown as word-by-word subtitles).
- - section: HOOK | BODY | TWIST.
- - visual: a DETAILED image-generation prompt for THIS frame only (35-60 words): subject, action, camera angle (low angle, wide, close-up, over-the-shoulder...), setting, light (moonlight, torch, volumetric fog, rim light), mood.
-   Vertical 9:16 cinematic dark fantasy / mystery. Characters are fictional (hooded figures, silhouettes, creatures are great). NO text, NO letters, NO logos, NO real people or celebrities, NO gore.
- - anim (screen animation cue): zoom_in (quick punch-in, great for reveals) | zoom_out | slow_zoom_out | push_in | pan_left | pan_right | shake (jolt/danger) | drift. Vary them; use shake only 2-3 times.
- - transition (how this scene starts): cut | flash (white flash, big reveal) | fade (from black, calm/eerie) | glitch (something is wrong). Mostly cut; flash <=4 times, glitch <=3 times.
- - emph: 1-2 KEY words from the text that pop up as big kinetic yellow text (empty for HOOK scenes).
- - sfx: one sound at the key moment (none | whoosh | thud | rise | gasp | knock | sparkle | alarm | buzz | scratch | gulp). Use it on about half the scenes.
-STYLE ANCHOR (style_anchor): ONE sentence (max 35 words) describing the fixed look of the whole film - colour palette, lighting and the main character's recurring appearance
-(clothes, face marks, props). It is appended to every image prompt so the frames look like the same movie.
-TITLE: 35-65 characters, curiosity-driven, no hashtags. DESCRIPTION: one hook sentence + 3-5 hashtags. TAGS: 6-10 short tags.
-TOPIC: one short line describing the story setup (used to avoid repeats). music_mood: mysterious (default) or epic.
-Return JSON only."""
+cv2.setNumThreads(2)
+FPS = 30
+W, H = 1080, 1920
+SW, SH = W // 4, H // 4
+YELLOW, WHITE, DIM = (255, 214, 40), (255, 255, 255), (150, 150, 165)
+IMPACT = {"thud", "gasp", "alarm", "knock", "buzz", "scratch"}      # in sfx par camera ko halka jhatka
+FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf", "DejaVuSans-Bold.ttf"]
+SUB_SECONDS = 3.8                                                   # video ke aakhri itne seconds subscribe pop-up dikhta hai
+_fonts = {}
 
 
-def schema():
-    S = lambda **k: {"type": "STRING", **k}
-    sc = {"type": "OBJECT", "properties": {"text": S(), "section": S(enum=SECTIONS), "visual": S(), "anim": S(enum=ANIMS),
-          "transition": S(enum=TRANS), "emph": S(), "sfx": S(enum=SFX)},
-          "required": ["text", "section", "visual", "anim", "transition", "emph", "sfx"]}
-    return {"type": "OBJECT", "properties": {"topic": S(), "title": S(), "description": S(), "tags": {"type": "ARRAY", "items": S()},
-            "music_mood": S(enum=MOODS), "style_anchor": S(), "scenes": {"type": "ARRAY", "items": sc}},
-            "required": ["topic", "title", "description", "tags", "music_mood", "style_anchor", "scenes"]}
-
-
-def ask(prompt, sch, max_out=8000, think=1024):
-    last = None
-    for model in MODELS:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        cfg = {"temperature": 1.0, "maxOutputTokens": max_out, "responseMimeType": "application/json", "responseSchema": sch}
-        if "2.5-flash" in model:
-            cfg["thinkingConfig"] = {"thinkingBudget": think}
-            cfg["maxOutputTokens"] = max_out + think
-        for attempt in range(3):
+def font(sz):
+    if sz not in _fonts:
+        for f in FONTS:
             try:
-                r = requests.post(url, headers={"x-goog-api-key": API_KEY}, json={"contents": [{"parts": [{"text": prompt}]}],
-                                  "generationConfig": cfg}, timeout=240)
-                if r.status_code == 200:
-                    cands = r.json().get("candidates") or []
-                    parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
-                    txt = "".join(p.get("text", "") for p in parts).strip()
-                    if not txt:
-                        last = f"{model}: empty answer (blocked or cut off)"
-                        continue
-                    return json.loads(re.sub(r"^```(?:json)?|```$", "", txt, flags=re.M).strip())
-                last = f"{model}: HTTP {r.status_code} {r.text[:160]}"
-                if r.status_code in (400, 401, 403, 404):    # retry se theek nahi hoga -> seedha agla model
+                _fonts[sz] = ImageFont.truetype(f, sz)
+                break
+            except Exception:
+                pass
+        else:
+            _fonts[sz] = ImageFont.load_default()
+    return _fonts[sz]
+
+
+def ease(x):
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
+
+
+def back(x):
+    x = min(1.0, max(0.0, x)) - 1.0
+    return 1 + 2.70158 * x ** 3 + 1.70158 * x ** 2
+
+
+def blit(frame, spr, cx, cy, scale=1.0, alpha=1.0):
+    if scale != 1.0:
+        spr = cv2.resize(spr, (max(2, int(spr.shape[1] * scale)), max(2, int(spr.shape[0] * scale))), interpolation=cv2.INTER_LINEAR)
+    h, w = spr.shape[:2]
+    x0, y0 = int(cx - w / 2), int(cy - h / 2)
+    xa, ya, xb, yb = max(0, x0), max(0, y0), min(W, x0 + w), min(H, y0 + h)
+    if xb <= xa or yb <= ya:
+        return
+    s = spr[ya - y0:yb - y0, xa - x0:xb - x0]
+    a = s[..., 3:4] / 255.0 * alpha
+    reg = frame[ya:yb, xa:xb].astype(np.float32)
+    frame[ya:yb, xa:xb] = (reg * (1 - a) + s[..., :3] * a).astype(np.uint8)
+
+
+# ---------------------------------------------------------------- text sprites
+_cap = {"key": None, "arr": None}
+
+
+def caption_sprite(texts, cur, size, maxw):
+    """Chunk ke words: bola ja chuka = safed, abhi bol raha = peela, aage wale = dhundhle. Kaale rounded box par."""
+    key = (tuple(texts), cur, size, maxw)
+    if _cap["key"] == key:
+        return _cap["arr"]
+    f = font(size)
+    probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    space = probe.textlength(" ", font=f)
+    wd = [probe.textlength(t, font=f) for t in texts]
+    lines, lw = [[]], 0.0
+    for k, w in enumerate(wd):
+        add = w + (space if lines[-1] else 0)
+        if lines[-1] and lw + add > maxw:
+            lines.append([k])
+            lw = w
+        else:
+            lines[-1].append(k)
+            lw += add
+    widths = [sum(wd[k] for k in ln) + space * (len(ln) - 1) for ln in lines]
+    lh = int(size * 1.3)
+    bw, bh = int(max(widths) + 68), int(lh * len(lines) + 40)
+    im = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 0, bw - 1, bh - 1], radius=int(size * 0.36), fill=(8, 8, 14, 205))
+    for li, ln in enumerate(lines):
+        x, y = (bw - widths[li]) / 2, 20 + li * lh
+        for k in ln:
+            col = YELLOW if k == cur else (WHITE if k < cur else DIM)
+            d.text((x, y), texts[k], font=f, fill=col + (255,), stroke_width=max(2, size // 28), stroke_fill=(0, 0, 0, 255))
+            x += wd[k] + space
+    arr = np.asarray(im).astype(np.float32)
+    _cap["key"], _cap["arr"] = key, arr
+    return arr
+
+
+_wcache = {}
+
+
+def word_sprite(w, size, color, stroke):
+    k = (w, size, color, stroke)
+    if k not in _wcache:
+        if len(_wcache) > 60:
+            _wcache.clear()
+        f = font(size)
+        tmp = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        l, t, r, b = tmp.textbbox((0, 0), w, font=f, stroke_width=stroke)
+        im = Image.new("RGBA", (r - l + 2 * stroke + 40, b - t + 2 * stroke + 40), (0, 0, 0, 0))
+        ImageDraw.Draw(im).text((20 + stroke - l, 20 + stroke - t), w, font=f, fill=color + (255,), stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+        _wcache[k] = np.asarray(im).astype(np.float32)
+    return _wcache[k]
+
+
+def make_subscribe():
+    im = Image.new("RGBA", (780, 230), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([10, 10, 770, 150], radius=70, fill=(215, 20, 25, 255), outline=(255, 255, 255, 255), width=6)
+    d.polygon([(70, 45), (70, 115), (130, 80)], fill=(255, 255, 255, 255))
+    d.text((165, 80), "SUBSCRIBE", font=font(66), fill=(255, 255, 255, 255), anchor="lm")
+    d.rounded_rectangle([150, 168, 630, 220], radius=24, fill=(8, 8, 14, 215))
+    d.text((390, 195), "FOLLOW FOR MORE DARK TALES", font=font(30), fill=YELLOW + (255,), anchor="mm")
+    return np.asarray(im).astype(np.float32)
+
+
+def make_chunks(words, mx=3):
+    """Words ko 3-3 ke groups mein (punctuation par bhi tootta hai), taake subtitle chhota aur padhne layak rahe."""
+    chunks, cur = [], []
+    for k, (w, _, _) in enumerate(words):
+        cur.append(k)
+        if len(cur) >= mx or w.endswith((".", "!", "?", ",", ";", ":")):
+            chunks.append(cur)
+            cur = []
+    if cur:
+        if chunks and len(cur) == 1 and len(chunks[-1]) <= 2:
+            chunks[-1] += cur
+        else:
+            chunks.append(cur)
+    return chunks
+
+
+def tok(w):
+    return "".join(c for c in w.lower() if c.isalnum() or c == "'")
+
+
+# ---------------------------------------------------------------- look: vignette, grade, camera, post
+def make_vignettes():
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    d = np.sqrt(((xx - W / 2) / (W * 0.72)) ** 2 + ((yy - H / 2) / (H * 0.66)) ** 2)
+    low = np.clip((yy / H - 0.55) / 0.45, 0, 1) ** 1.5                      # neeche halka andhera: subtitle saaf dikhe
+    base = (1 - 0.55 * np.clip(d - 0.30, 0, 1) ** 1.3) * (1 - 0.40 * low)
+    strong = (1 - 0.92 * np.clip(d - 0.18, 0, 1) ** 1.15) * (1 - 0.40 * low)
+    return np.clip(base, 0, 1)[..., None].astype(np.float32), np.clip(strong, 0, 1)[..., None].astype(np.float32)
+
+
+def make_lut():
+    x = np.linspace(0, 1, 256)
+    s = x ** 1.12
+    s = s + 0.14 * np.sin(np.pi * s) * (s - 0.5) * 2
+    sh, hi = (-0.02, 0.012, 0.045), (0.05, 0.02, -0.04)                    # shadows teal, highlights amber
+    ch = [np.clip(s + sh[c] * (1 - s) ** 2 + hi[c] * s ** 2, 0, 1) for c in range(3)]
+    return (np.stack(ch, axis=1) * 255).astype(np.uint8).reshape(256, 1, 3)
+
+
+def camera(kind, lt, hold, seed):
+    """Scene ke cue (anim) ke hisaab se (zoom, shift_x, shift_y)."""
+    p = min(1.0, lt / max(0.1, hold))
+    z, dx, dy = 1.0, 0.0, 0.0
+    if kind == "zoom_in":
+        z = 1.0 + 0.22 * (1 - (1 - p) ** 2.2)
+    elif kind == "zoom_out":
+        z = 1.22 - 0.22 * ease(p)
+    elif kind == "slow_zoom_out":
+        z = 1.18 - 0.18 * p
+    elif kind == "push_in":
+        z = 1.02 + 0.10 * p
+    elif kind == "pan_left":
+        z, dx = 1.10, 70 * (1 - 2 * p)
+    elif kind == "pan_right":
+        z, dx = 1.10, -70 * (1 - 2 * p)
+    elif kind == "shake":
+        amp = 9 + 16 * math.exp(-lt * 4)
+        z, dx, dy = 1.08 + 0.04 * p, amp * math.sin(lt * 47 + seed), amp * math.cos(lt * 53 + 2 * seed)
+    else:                                                                   # drift
+        z, dx = 1.03 + 0.05 * p, 25 * math.sin(lt * 0.8 + seed)
+    return z, dx + 3 * math.sin(lt * 1.3 + seed), dy + 3 * math.cos(lt * 1.1 + seed)
+
+
+def crop(bg, z, dx, dy):
+    """Bade bg se frame-size crop: zoom z + shift (bg ke bahar na jaye)."""
+    bh, bw = bg.shape[:2]
+    mx, my = max(0.0, (bw - W / z) / 2 - 2), max(0.0, (bh - H / z) / 2 - 2)
+    dx, dy = max(-mx, min(mx, dx)), max(-my, min(my, dy))
+    M = np.array([[z, 0, W / 2 - z * (bw / 2 + dx)], [0, z, H / 2 - z * (bh / 2 + dy)]], np.float32)
+    return cv2.warpAffine(bg, M, (W, H), flags=cv2.INTER_LINEAR)
+
+
+def glitch(frame, k, f):
+    """Glitch transition: RGB channels alag khisakte hain + kuch patties side mein."""
+    rnd = np.random.RandomState(f * 7 + 3)
+    out = frame.copy()
+    sh = int(22 * k)
+    out[..., 0] = np.roll(frame[..., 0], sh, axis=1)
+    out[..., 2] = np.roll(frame[..., 2], -sh, axis=1)
+    for _ in range(6):
+        y, h = rnd.randint(0, H - 140), rnd.randint(24, 130)
+        out[y:y + h] = np.roll(out[y:y + h], int(rnd.randint(-90, 90) * k), axis=1)
+    return out
+
+
+class Embers:
+    """Hawa mein tairte dhool/angaare (low-res add layer, bloom ke saath upscale hota hai)."""
+
+    def __init__(self, seed):
+        self.p = np.random.RandomState(seed % 1000 + 5).rand(34, 5)            # x, y, speed, size, phase
+
+    def layer(self, tg):
+        dl = np.zeros((SH, SW, 3), np.float32)
+        for x, y, sp, sz, ph in self.p:
+            cx = ((x + 0.03 * math.sin(tg * 0.6 + ph * 6) + tg * 0.012 * (sp - 0.3)) % 1.0) * SW
+            cy = ((y - tg * (0.02 + 0.05 * sp)) % 1.0) * SH
+            col = (255, 170, 90) if ph > 0.5 else (170, 200, 255)
+            cv2.circle(dl, (int(cx), int(cy)), 1 + int(sz * 2), tuple(float(v) * 0.22 for v in col), -1, cv2.LINE_AA)
+        return cv2.GaussianBlur(dl, (0, 0), 1.2)
+
+
+def post(frame, vig, grain, f, add_small, lut, flash=0.0):
+    small = cv2.resize(frame, (SW, SH), interpolation=cv2.INTER_AREA).astype(np.float32)
+    hi = np.clip(small - 175, 0, None) * 1.3
+    glow = cv2.GaussianBlur(hi, (0, 0), 6) + 0.6 * cv2.GaussianBlur(hi, (0, 0), 16)
+    layer = cv2.resize(glow * 0.50 + add_small, (W, H), interpolation=cv2.INTER_LINEAR)
+    out = (frame.astype(np.float32) + layer) * vig
+    out += grain[(f * 37) % 5] + flash
+    return cv2.LUT(np.clip(out, 0, 255).astype(np.uint8), lut)
+
+
+class Renderer:
+    def __init__(self, data, info, bgs, seed, total):
+        self.scenes, self.info, self.bgs, self.seed = data["scenes"], info, bgs, seed
+        self.starts = [x["start"] for x in info]
+        self.chunks = [make_chunks(x["words"]) for x in info]
+        self.emph = [{tok(w) for w in (s.get("emph") or "").split()} - {""} for s in self.scenes]
+        self.vig_base, self.vig_strong = make_vignettes()
+        rng = np.random.RandomState(5)
+        self.grain = [(rng.randn(H, W, 1).astype(np.float32) * 1.3) for _ in range(5)]
+        self.lut = make_lut()
+        self.fx = Embers(seed)
+        self.sub = make_subscribe()
+        self.sub_t0 = max(0.0, total - SUB_SECONDS)
+
+    def frame(self, f):
+        tg = f / FPS
+        i = max(0, bisect.bisect_right(self.starts, tg + 1e-9) - 1)
+        sc, nf = self.scenes[i], self.info[i]
+        lt, hold = tg - self.starts[i], max(0.1, nf["hold"])
+        last = i == len(self.scenes) - 1
+        hook = sc.get("section") == "HOOK"
+        z, dx, dy = camera(sc.get("anim", "push_in"), lt, hold, i)
+        # ---- transition (scene ki shuruaat): flash / fade / glitch / cut-punch
+        trans = sc.get("transition", "cut") if i > 0 else "flash"
+        flash, fade, gl = 0.0, 1.0, 0.0
+        if trans == "flash" and lt < 0.30:
+            q = lt / 0.30
+            flash, z = 150.0 * (1 - q) ** 2, z * (1 + 0.03 * (1 - q))
+        elif trans == "fade" and lt < 0.40:
+            fade = ease(lt / 0.40)
+        elif trans == "glitch" and lt < 0.28:
+            gl = 1 - lt / 0.28
+        elif trans == "cut" and lt < 0.18:
+            z *= 1 + 0.045 * (1 - lt / 0.18) ** 2
+        if sc.get("sfx") in IMPACT and 0.10 <= lt < 0.55:                    # impact par halka camera jhatka
+            a = 16 * math.exp(-(lt - 0.10) * 8)
+            dx, dy = dx + a * math.sin(lt * 95), dy + a * math.cos(lt * 83)
+        frame = crop(self.bgs[i], z, dx, dy)
+        if gl > 0:
+            frame = glitch(frame, gl, f)
+        vig = self.vig_base
+        if last:                                                             # aakhri scene: vignette dheere dheere gehri
+            vig = self.vig_base + (self.vig_strong - self.vig_base) * ease(lt / hold)
+        frame = post(frame, vig, self.grain, f, self.fx.layer(tg), self.lut, flash)
+        if fade < 1.0:
+            frame = (frame.astype(np.float32) * fade).astype(np.uint8)
+        # ---- word-by-word subtitles
+        words = nf["words"]
+        started = [k for k, (_, a_, _) in enumerate(words) if a_ <= lt]
+        if started:
+            k = started[-1]
+            chunk = next(c for c in self.chunks[i] if k in c)
+            size, mw = (104, 940) if hook else (80, 920)
+            spr = caption_sprite([words[j][0].upper() for j in chunk], chunk.index(k), size, mw)
+            pop = 1.0 + 0.10 * max(0.0, 1 - (lt - words[k][1]) / 0.12)
+            if hook:                                                         # hook: bada, beech mein, kaanpta hua text
+                blit(frame, spr, W / 2 + 7 * math.sin(tg * 61), 0.40 * H + 6 * math.cos(tg * 53), pop)
+            else:
+                blit(frame, spr, W / 2, 0.69 * H, pop)
+        # ---- kinetic text: key word bada peela pop
+        if not hook and self.emph[i]:
+            for w, a_, b_ in words:
+                if tok(w) in self.emph[i] and a_ <= lt < b_ + 0.45:
+                    pop = 1 + 0.38 * max(0.0, 1 - (lt - a_) / 0.16)
+                    spr = word_sprite(tok(w).upper(), 150, YELLOW, 11)
+                    blit(frame, spr, W / 2 + 5 * math.sin(tg * 70), 0.27 * H + 4 * math.cos(tg * 61),
+                         min(1.0, 940 / spr.shape[1]) * pop, max(0.0, min(1.0, (b_ + 0.45 - lt) / 0.15)))
                     break
-                time.sleep(20 if r.status_code == 429 else 5 * (attempt + 1))
-            except Exception as e:
-                last = f"{model}: {e}"
-                time.sleep(4)
-    raise RuntimeError(last)
+        # ---- subscribe/follow pop-up (aakhir mein)
+        if tg >= self.sub_t0:
+            p = (tg - self.sub_t0) / 0.45
+            blit(frame, self.sub, W / 2, 0.565 * H, max(0.05, back(p)) * (1 + 0.025 * math.sin(tg * 6)), min(1.0, p * 3))
+        return frame
 
 
-def _words(s):
-    return {re.sub(r"(ed|s)$", "", w) for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 3}
+def create(data, out_path):
+    scenes = data["scenes"]
+    tmp = tempfile.mkdtemp()
+    t_start = time.time()
+    seed = zlib.crc32(data.get("topic", "x").encode()) % 100000
+    vox, info, total = voice.build(scenes, tmp, FPS)
+    # ---- har scene ki apni image (style_anchor har prompt mein: poori film ek jaisi dikhe)
+    anchor = data.get("style_anchor", "")
+    bgs = []
+    for i, sc in enumerate(scenes):
+        print(f"[img] scene {i + 1}/{len(scenes)}: {sc['visual'][:60]}", flush=True)
+        bgs.append(bgimg.get_bg(f"{sc['visual']}, {anchor}", seed + i * 31))
+    # ---- audio mix (voice + dark music + sfx)
+    sub_t0 = max(0.0, total - SUB_SECONDS)
+    v44 = np.interp(np.linspace(0, len(vox), int(len(vox) * music.SR / voice.SR), endpoint=False), np.arange(len(vox)), vox).astype(np.float32)
+    ev = []
+    for i, sc in enumerate(scenes):
+        st, trans = info[i]["start"], (sc.get("transition", "cut") if i else "flash")
+        ev.append((st + 0.02, "whoosh", 0.45 if trans in ("flash", "glitch") else 0.22))
+        if trans == "glitch":
+            ev.append((st + 0.02, "buzz", 0.35))
+        s = sc.get("sfx", "none")
+        if s != "none":
+            ev.append((st + (0.05 if s in ("whoosh", "rise") else 0.15), s, 0.9))
+        if sc.get("section") == "TWIST" and (i == 0 or scenes[i - 1].get("section") != "TWIST"):
+            ev.append((st + 0.05, "thud", 1.0))                              # twist ka dhamaka
+    ev.append((sub_t0 + 0.05, "ding", 0.6))
+    mixed, credit = music.mix(v44, total, data.get("music_mood", "mysterious"), seed, ev)
+    audio_path = os.path.join(tmp, "mix.wav")
+    music.write_wav(audio_path, mixed)
+    print(f"[render] audio ok ({total:.1f}s, {len(ev)} sfx)", flush=True)
 
-
-def too_similar(topic, past, thr=0.4):
-    """Same story ko naye alfaaz mein dobara na banaye (sirf exact match nahi, overlap bhi dekhta hai)."""
-    a = _words(topic)
-    if not a:
-        return False
-    for p in past:
-        b = _words(p)
-        if b and len(a & b) / len(a | b) >= thr:
-            return True
-    return False
-
-
-def load_history():
+    R = Renderer(data, info, bgs, seed, total)
+    n_frames = int(round(total * FPS))
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
+           "-i", audio_path, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac",
+           "-b:a", "192k", "-shortest", "-movflags", "+faststart", os.path.abspath(out_path)]
+    faulthandler.dump_traceback_later(300, repeat=True)
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    last = None
     try:
-        return json.load(open(HISTORY, encoding="utf-8"))
-    except Exception:
-        return []
-
-
-def _tok(w):
-    return re.sub(r"[^a-z0-9']", "", w.lower())
-
-
-def finalize(d):
-    """Sections ki tarteeb, default cues, aur fixed cues: pehla scene zoom-in+flash, twist flash se shuru, aakhri scene slow zoom-out."""
-    sc = d["scenes"]
-    order = [SECTIONS.index(s["section"]) if s.get("section") in SECTIONS else -1 for s in sc]
-    ok = (min(order) >= 0 and order == sorted(order) and order.count(0) >= 1 and order.count(2) >= 2)
-    if not ok:                                              # model ki tarteeb galat -> position se: pehle 2 HOOK, aakhri 4 TWIST
-        n = len(sc)
-        for k, s in enumerate(sc):
-            s["section"] = "HOOK" if k < 2 else ("TWIST" if k >= n - 4 else "BODY")
-    body_cycle = ["push_in", "pan_left", "zoom_in", "drift", "pan_right", "push_in"]
-    for k, s in enumerate(sc):
-        if s.get("anim") not in ANIMS:
-            s["anim"] = "zoom_in" if s["section"] == "HOOK" else body_cycle[k % len(body_cycle)]
-        if s.get("transition") not in TRANS:
-            s["transition"] = "cut"
-        if s.get("sfx") not in SFX:
-            s["sfx"] = "none"
-        s["visual"] = re.sub(r"\s+", " ", s.get("visual") or "").strip() or f"dark fantasy cinematic scene, {s['text']}"
-        toks = {_tok(w) for w in s["text"].split()}
-        em = [w for w in re.findall(r"[A-Za-z0-9']+", s.get("emph") or "") if _tok(w) in toks][:2]
-        s["emph"] = "" if s["section"] == "HOOK" else " ".join(em)
-    sc[0]["anim"], sc[0]["transition"] = "zoom_in", "flash"
-    first_twist = next(k for k, s in enumerate(sc) if s["section"] == "TWIST")
-    sc[first_twist]["transition"] = "flash"
-    sc[-1]["anim"] = "slow_zoom_out"
-    d["style_anchor"] = re.sub(r"\s+", " ", d.get("style_anchor") or "").strip() or "cinematic dark fantasy, teal and amber palette, volumetric fog, lone hooded traveller"
-    if d.get("music_mood") not in MOODS:
-        d["music_mood"] = "mysterious"
-    return d
-
-
-def clean(d):
-    for s in d["scenes"]:
-        s["text"] = re.sub(r"\s+", " ", str(s.get("text", ""))).strip()
-    d["scenes"] = [s for s in d["scenes"] if s["text"]]
-    words = sum(len(s["text"].split()) for s in d["scenes"])
-    if not (16 <= len(d["scenes"]) <= 28 and 105 <= words <= 175):
-        raise ValueError(f"bad size: {len(d['scenes'])} scenes / {words} words")
-    t = re.sub(r"\s*#\w+", "", d["title"]).strip()           # title mein hashtag main.py lagata hai
-    if len(t) > 80:
-        t = t[:80].rsplit(" ", 1)[0]
-    d["title"] = t
-    tags = []
-    for x in d.get("tags") or []:                            # YouTube: tags kul 500 chars se kam
-        x = re.sub(r"[^\w ]", "", str(x)).strip()
-        if x and x.lower() not in [y.lower() for y in tags] and sum(len(y) + 1 for y in tags) + len(x) < 400:
-            tags.append(x)
-    d["tags"] = tags[:10] or ["darkfantasy", "mystery", "storytime", "twist"]
-    return finalize(d)
-
-
-def _S(text, sec, visual, anim="push_in", trans="cut", sfx="none", emph=""):
-    return dict(text=text, section=sec, visual=visual, anim=anim, transition=trans, sfx=sfx, emph=emph)
-
-
-FALLBACK = {
-    "topic": "a lighthouse keeper discovers the light is a lullaby for drowned keepers", "title": "The Lighthouse Never Guided Ships",
-    "description": "Every night, the light was calling something else.\n\n#darkfantasy #mystery #storytime #twist #shorts",
-    "tags": ["darkfantasy", "mystery", "storytime", "twist", "shorts"], "music_mood": "mysterious",
-    "style_anchor": "cinematic dark fantasy, teal storm and amber lantern light, lone keeper in a yellow oilskin coat with a grey beard",
-    "scenes": [
-        _S("Every night, this lighthouse never guided a single ship.", "HOOK", "low angle of a towering black lighthouse on a cliff, beam cutting through storm clouds, huge waves below, moonlight"),
-        _S("It was calling something else.", "HOOK", "close-up of a giant glowing lamp lens, amber light, swirling fog, eerie reflection of a pale face"),
-        _S("Elias became keeper after the last man vanished.", "BODY", "old keeper in a yellow oilskin coat climbing a spiral staircase, lantern in hand, long shadows"),
-        _S("Rule one in the logbook: never watch the sea at midnight.", "BODY", "open leather logbook on a wooden desk, candle flame, handwritten warning, dust in the air", "push_in", "cut", "knock", "midnight"),
-        _S("For years, he obeyed.", "BODY", "wide shot of the lighthouse at dawn over calm teal water, seagulls, soft mist"),
-        _S("Then one stormy night, the lamp went dark.", "BODY", "lighthouse lamp room going black, lightning flash outside the windows, keeper silhouette", "shake", "glitch", "buzz", "dark"),
-        _S("Below, the waves pulled back like a curtain.", "BODY", "dark ocean water drawing back from the rocks, exposed seabed, glowing foam, ominous sky", "pan_left"),
-        _S("Hundreds of pale hands rose from the water.", "BODY", "hundreds of pale ghostly hands rising from black sea water under moonlight, volumetric fog", "zoom_in", "flash", "gasp", "hands"),
-        _S("They weren't drowning. They were waiting.", "BODY", "close-up of one pale hand open towards the lighthouse beam, water dripping, teal glow", "drift", "cut", "none", "waiting"),
-        _S("Elias relit the lamp with shaking fingers.", "BODY", "keeper's trembling hands striking a match beside a huge lens, sparks, amber glow", "push_in", "cut", "rise"),
-        _S("The hands sank back, calm. He had kept them asleep.", "TWIST", "pale hands slowly sinking into calm glowing water, lighthouse beam sweeping, peaceful eerie mood", "zoom_out", "flash", "thud", "asleep"),
-        _S("The logbook's last page was in his handwriting.", "TWIST", "close-up of a logbook page with scratchy handwriting, candlelight, trembling finger", "push_in", "fade", "none", "handwriting"),
-        _S("Every keeper before him wrote the same warning.", "TWIST", "shelf of identical old logbooks with a dozen yellow coats hanging on hooks, dim lantern", "pan_right"),
-        _S("The light was never for ships.", "TWIST", "wide cinematic shot of the lighthouse beam over the sea, shadowy figures below the surface", "drift", "cut", "whoosh"),
-        _S("It was a lullaby for the drowned keepers.", "TWIST", "lantern glowing over a sea of sleeping pale faces beneath the waves, teal and amber, ethereal", "zoom_out", "cut", "sparkle", "lullaby"),
-        _S("And tonight, the sea whispered his name.", "TWIST", "keeper alone on the balcony at night, huge dark waves, moon behind clouds, wind in his coat", "slow_zoom_out", "cut", "none", "whispered"),
-    ],
-}
-
-ANIM_TXT = {"zoom_in": "Quick zoom-in", "zoom_out": "Zoom-out", "slow_zoom_out": "Slow zoom-out + dramatic vignette", "push_in": "Slow push-in",
-            "pan_left": "Pan left", "pan_right": "Pan right", "shake": "Camera shake", "drift": "Floating drift"}
-TRANS_TXT = {"cut": "hard cut", "flash": "flash transition", "fade": "fade from black", "glitch": "glitch transition"}
-
-
-def write_plan(d):
-    """story_plan.md: tumhare format mein (1. HOOK / 2. BODY / 3. TWIST & OUTRO) - padhne ke liye, video isi se banti hai."""
-    heads = [("HOOK", "1. [HOOK - 0 to 5 seconds]"), ("BODY", "2. [BODY - 5 to 45 seconds]"), ("TWIST", "3. [TWIST & OUTRO - 45 to 60 seconds]")]
-    out = [f"# {d['title']}", "", f"Style: {d['style_anchor']}", "Subtitles: word-by-word highlighted (yellow/white on dark box)", ""]
-    last = len(d["scenes"])
-    for key, head in heads:
-        out.append(head)
-        for n, s in enumerate(d["scenes"], 1):
-            if s["section"] != key:
-                continue
-            cue = [ANIM_TXT.get(s["anim"], s["anim"]), TRANS_TXT.get(s["transition"], s["transition"])]
-            if s["emph"]:
-                cue.append(f"kinetic text: {s['emph'].upper()}")
-            if key == "HOOK":
-                cue.append("shaking bold text")
-            if s["sfx"] != "none":
-                cue.append(f"sfx: {s['sfx']}")
-            if n == last:
-                cue.append("pop-up subscribe/follow cue")
-            out += [f"   - Scene {n} | Text/Script: {s['text']}", f"       Screen Animation Cue: {', '.join(cue)}",
-                    f"       Visual Scene Description: {s['visual']}"]
-        out.append("")
-    open(PLAN, "w", encoding="utf-8").write("\n".join(out))
+        for f in range(n_frames):
+            try:
+                frame = R.frame(f)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                if last is None:
+                    raise
+                frame = last
+            last = frame
+            try:
+                proc.stdin.write(frame.tobytes())
+            except BrokenPipeError:
+                break
+            if f % 90 == 0:
+                print(f"[render] frame {f}/{n_frames} ({time.time() - t_start:.0f}s)", flush=True)
+        proc.stdin.close()
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        rc = proc.wait()
+        faulthandler.cancel_dump_traceback_later()
+    if rc != 0:
+        sys.exit(f"ERROR: ffmpeg fail (code {rc})")
+    print(f"Video created: {out_path} ({total:.1f}s, {len(scenes)} scenes, {time.time() - t_start:.0f}s lagay)")
+    if not 40 <= total <= 62:
+        print(f"NOTE: video {total:.0f}s ki hai (target 45-60s). Zyada farq ho to VOICE_SPEED badal kar dekho.")
+    if total > 179:
+        print("WARNING: 3 minute se lamba hai; YouTube ise Short nahi manega")
+    return credit
 
 
 def main():
-    for p in (OUT, PLAN):
-        if os.path.exists(p):
-            os.remove(p)
-    hist = load_history()
-    recent = [h.get("topic", "") for h in hist[-150:]]
-    d, fb = None, False
-    rejected = []
-    if API_KEY:
-        for attempt in range(4):
-            seeds = (f"Inspiration (twist it into something fresh, do not copy literally): setting = {random.choice(SETTINGS)}; "
-                     f"hero = {random.choice(HEROES)}; twist type = {random.choice(TWISTS)}.")
-            prompt = (f"{RULES}\n\n{seeds}\nDo NOT repeat or closely resemble any of these past stories: {recent[-60:] + rejected}\nJSON only.")
-            try:
-                cand = clean(ask(prompt, schema()))
-                if too_similar(cand["topic"] + " " + cand["title"], recent):
-                    rejected.append(cand["topic"])
-                    print(f"story attempt {attempt + 1}: too similar to history ({cand['topic']}) -> retry")
-                    continue
-                d = cand
-                break
-            except Exception as e:
-                print(f"story attempt {attempt + 1} failed: {e}")
-                time.sleep(3)
-    if not d:
-        if not os.environ.get("ALLOW_FALLBACK"):
-            # Fallback par har baar wahi video upload hoti thi. Ab run fail hota hai, kuch upload nahi hota.
-            sys.exit("ERROR: no fresh Gemini story (check GEMINI_API_KEY / quota). Stopping so no duplicate video is uploaded.")
-        print("ALLOW_FALLBACK set -> offline fallback story (history mein save nahi hogi)")
-        import copy
-        d, fb = finalize(copy.deepcopy(FALLBACK)), True
-    json.dump(d, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    write_plan(d)
-    print("SCRIPT:", d["title"], f"({len(d['scenes'])} scenes, {sum(len(s['text'].split()) for s in d['scenes'])} words)")
-    if not fb and not any(h.get("topic", "").lower() == d["topic"].lower() for h in hist):
-        hist.append({"topic": d["topic"], "title": d["title"], "date": datetime.date.today().isoformat()})
-        json.dump(hist[-300:], open(HISTORY, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    if not os.path.exists("script.json"):
+        sys.exit("script.json nahi mila (pehle story_gen.py chalayein)")
+    data = json.load(open("script.json", encoding="utf-8"))
+    credit = create(data, "output.mp4")
+    if credit:
+        data["description"] = (data.get("description", "") + "\n\n" + credit).strip()
+        json.dump(data, open("script.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
