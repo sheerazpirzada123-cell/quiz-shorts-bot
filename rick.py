@@ -4,7 +4,10 @@ collar/polo/hoodie/stripe shirts, belt, jeans cuff, shoes (toe cap + laces). Pic
  - IK fix (elbow bahar, knee aage), eyebrows ka emotion bug fix
  - lipsync: 4 mouth shapes (band / oh / ah / ee) + teeth + tongue, audio se aate hain
  - animation: anticipation/overshoot, breathing, weight shift, hop, squash&stretch, proper walk cycle
- - light: scene ki light direction (ls), key/fill, ground bounce, directional rim light"""
+ - light: scene ki light direction (ls), key/fill, ground bounce, directional rim light
+v4: smooth motion (overshoot naram, sar/gardan ka follow-through, awaaz ki smooth energy se gesture), asli saans (seena phoolta hai),
+natural blink (random waqt, naram band/khulna, kabhi double-blink) + aankhon ki halki harkat, aur HELD PROPS: prop haathon ke
+bilkul beech grip point par, peeche wala haath prop ke peeche, aage wala haath prop ke upar (barrel/murgi/andey/sikke/moneybag)\"\"\"
 import math
 import zlib
 
@@ -33,7 +36,7 @@ def ease(x):
 
 def back(x):
     x = min(1.0, max(0.0, x))
-    c = 1.9
+    c = 1.25                                    # pehle 1.9 (bohot zyada overshoot = jhatka); ab naram
     return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2
 
 
@@ -47,6 +50,23 @@ def lerp(a, b, k):
 
 def lerp2(a, b, k):
     return (a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k)
+
+
+def blink_open(t, seed):
+    """Aankh kitni khuli hai (1 = poori, ~0.06 = band). Har character ka apna rhythm, har blink ka apna waqt (3-4 sec),
+    kabhi kabhi double-blink; band hona tez, khulna thoda dheere (sine curve) => robotic nahi lagta."""
+    seed = int(seed)
+    P = 3.2 + 0.8 * ((seed * 7) % 10) / 10.0
+    tt = t + (seed % 23) * 0.37
+    n = int(tt // P)
+    r = ((n * 2654435761 + seed * 40503) % 65536) / 65536.0
+    u = tt - n * P - (0.35 + r * (P - 1.0))
+    dur = 0.18
+    for s0 in ((0.0, 0.26) if r > 0.8 else (0.0,)):
+        k = (u - s0) / dur
+        if 0.0 <= k < 1.0:
+            return 1.0 - 0.94 * math.sin(math.pi * k)
+    return 1.0
 
 
 def ik(s, t, l1, l2, score):
@@ -110,6 +130,20 @@ class Pen:
         cv2.polylines(self.rgb, [a], False, color, max(1, int(w * s)), cv2.LINE_AA, 4)
         cv2.polylines(self.m, [a], False, 255, max(1, int((w + 2 * ow) * s)), cv2.LINE_AA, 4)
 
+    def paste(self, rgb, al, x, y):
+        """Float sprite (rgb 0..255, alpha 0..1, pen ke supersampled px mein) ko (x, y) top-left par blend karta hai.
+        Mask bhi badhta hai (taake bounding box/rim light prop ko bhi shamil karein)."""
+        h, w = al.shape
+        X0, Y0 = int(round(x)), int(round(y))
+        xa, ya, xb, yb = max(0, X0), max(0, Y0), min(self.w, X0 + w), min(self.h, Y0 + h)
+        if xb <= xa or yb <= ya:
+            return
+        a = al[ya - Y0:yb - Y0, xa - X0:xb - X0]
+        c = rgb[ya - Y0:yb - Y0, xa - X0:xb - X0]
+        reg = self.rgb[ya:yb, xa:xb].astype(np.float32)
+        self.rgb[ya:yb, xa:xb] = np.clip(reg * (1 - a[..., None]) + c * a[..., None], 0, 255).astype(np.uint8)
+        self.m[ya:yb, xa:xb] = np.maximum(self.m[ya:yb, xa:xb], (a * 255).astype(np.uint8))
+
     def blend_in_mask(self, draw_fn, alpha, c, r):
         """Mask ke andar hi shade/highlight (soft shading). Sirf (c, r) ke aas-paas ka box process hota hai (tez)."""
         x0, y0 = max(0, int((c[0] - r) * self.ss)), max(0, int((c[1] - r) * self.ss))
@@ -163,11 +197,12 @@ def walk_speed(action):
 REST = dict(lh=(-0.13, 0.33), rh=(0.13, 0.33), lf=(-0.065, 0.0), rf=(0.065, 0.0))
 
 
-def pose(action, t, talk, mouth):
-    """Hand/foot targets (H-units, feet-centre se, x: facing ki taraf +, y upar +). talk: speaker abhi bol raha hai?"""
+def pose(action, t, talk, mouth, grip=None):
+    """Hand/foot targets (H-units, feet-centre se, x: facing ki taraf +, y upar +). talk: speaker abhi bol raha hai?
+    mouth yahan SMOOTH energy hai (gesture ke liye), raw lip-sync nahi. grip: {lh, rh} => haath prop pakadne ki jagah par."""
     s = math.sin
     p = dict(REST)
-    p.update(bob=0.003 * s(t * 2.3), tilt=0.0, lean=0.012 * s(t * 1.1), nod=0.0, jump=0.0)
+    p.update(bob=0.003 * s(t * 2.3), tilt=0.006 * s(t * 0.8 + 1.3), lean=0.012 * s(t * 1.1), nod=0.0, jump=0.0)
     tgt = dict(lh=None, rh=None)
     k = back(t / 0.30)          # action shuru hone par rest -> pose, thoda overshoot ke saath
     if action in ("talk", "idle", "smile", "listen"):
@@ -264,6 +299,9 @@ def pose(action, t, talk, mouth):
     if action not in ("walk", "run"):          # halki, natural harkat (over-acting nahi)
         for key_ in ("jump", "tilt", "nod", "lean"):
             p[key_] *= 0.75
+    if grip is not None and action not in ("walk", "run"):      # prop pakda hua hai: haath grip par, overshoot ke bina
+        tgt["lh"], tgt["rh"] = grip["lh"], grip["rh"]
+        k = ease(t / 0.30)
     for key in ("lh", "rh"):
         if tgt[key] is not None:
             p[key] = lerp2(REST[key], tgt[key], k)
@@ -325,9 +363,47 @@ def hand(pen, c, dv, R, ow, pointing=False):
     pen.ellipse((pc[0] - dv[0] * R * 0.2 - side * nx * R * 0.2, pc[1] - dv[1] * R * 0.2 - side * ny * R * 0.2), R * 0.35, R * 0.22, (255, 255, 255), 0, ang)
 
 
-def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing, enter, blink_seed, ls):
+def prep_held(held, pen, H):
+    """Held prop ka sprite (pen ke supersampled scale par), uska grip point aur haathon ke target.
+    held = dict(render(scale)->(rgb, al, ox, oy), gx, gy (bbox fraction, upar se), hy (haath ki unchai, H-units),
+    fwd (prop ka markaz body se aage, H-units), appear 0..1). Prop ka asli size sprite ke alpha bbox se naapa jata hai."""
+    try:
+        rgb, al, _, _ = held["render"](pen.ss)
+    except Exception:
+        return None
+    if rgb is None or al is None:
+        return None
+    al = np.asarray(al, np.float32)
+    if al.size == 0:
+        return None
+    if al.max() > 1.5:
+        al = al / 255.0
+    rgb = np.asarray(rgb, np.float32)
+    ys, xs = np.where(al > 0.08)
+    if len(xs) < 4:
+        return None
+    bx0, bx1, by0, by1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
+    bw = (bx1 - bx0) / pen.ss                                    # prop ki chaurai (window px)
+    hw = min(0.185, max(0.075, 0.5 * bw * held.get("reach", 1.0) / H))     # haath prop ke dono kinaron par (arm ki lambai ke andar)
+    gx = bx0 + held.get("gx", 0.5) * (bx1 - bx0)
+    gy = by0 + held.get("gy", 0.5) * (by1 - by0)
+    ap = float(held.get("appear", 1.0))
+    if ap < 0.999:                                               # prop nazar aate waqt grip point se chhota -> bada
+        if ap <= 0.03:
+            rgb = al = None
+        else:
+            nw, nh = max(2, int(al.shape[1] * ap)), max(2, int(al.shape[0] * ap))
+            rgb = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_AREA)
+            al = cv2.resize(al, (nw, nh), interpolation=cv2.INTER_AREA)
+            gx, gy = gx * ap, gy * ap
+    fwd, hy = held.get("fwd", 0.11), held.get("hy", 0.40)
+    return dict(rgb=rgb, al=al, gx=gx, gy=gy, grip=dict(lh=(fwd - hw, hy), rh=(fwd + hw, hy)))
+
+
+def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing, enter, blink_seed, ls, energy=None, held=None):
     """pen: Pen window; (fx,fy) = pairon ka markaz (window coords, px); H = qad px; facing +1 right / -1 left;
-    ls = light ki taraf (+1 light daayen se, -1 baayen se)."""
+    ls = light ki taraf (+1 light daayen se, -1 baayen se). energy = awaaz ki smooth energy (gesture ke liye);
+    held = prop jo haathon mein hai (prep_held dekhein)."""
     d = 1 if facing >= 0 else -1
     shirt = col(ch.get("shirt", "yellow"), SHIRTS, SHIRTS["yellow"])
     hat = ch.get("hat", "none")
@@ -337,7 +413,12 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     style = ch.get("style") or ("tee", "polo", "stripe", "hoodie")[zlib.crc32(str(ch.get("name", "x")).encode()) % 4]
     ow = max(1.3, 0.011 * H)
     lw = max(1.6, 0.017 * H)
-    po = pose(action, t, talk, mouth)
+    en = mouth if energy is None else energy                         # gesture smooth energy se, lip-sync raw mouth se
+    hd = prep_held(held, pen, H) if held else None
+    grip = hd["grip"] if hd else None
+    po = pose(action, t, talk, en, grip)
+    po_l = pose(action, max(0.0, t - 0.07), talk, en, grip)         # sar/gardan body se thoda late (follow-through)
+    br = math.sin(t * 1.75)                                          # saans (~3.6 sec ka chakkar)
     # ---- entrance squash & stretch (girte waqt lamba, utarte hi chapta)
     sx = sy = 1.0
     if enter < 1.0:
@@ -354,7 +435,7 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     Yf = lambda y: fy - (y + jump) * H * sy                # feet (sirf jump)
     shear = lambda x, y: x + lean * 0.9 * (y - 0.33) / 0.27   # torso ka jhukaav (neeche hip, upar lean)
     hip_y = 0.345
-    sh_y = 0.585
+    sh_y = 0.585 + 0.0025 * br                              # saans mein kandhe halke uthte hain
     lsh = (-0.075 + lean * 0.85, sh_y)
     rsh = (0.075 + lean * 0.85, sh_y)
     # ---- legs (jeans + cuff, sneakers: toe cap + sole + laces)
@@ -391,11 +472,12 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
 
     arm(lsh, po["lh"], -1)
     # ---- torso
+    tbw, tbh = 0.108 * (1 + 0.018 * br), 0.150 * (1 + 0.030 * br)            # saans: seena halka phoolta/sikudta hai
     tp = []                                                                  # aloo/bean jaisa potato torso (super-ellipse)
     for k_ in range(40):
         th = 2 * math.pi * k_ / 40
         cs, sn = math.cos(th), math.sin(th)
-        tp.append((shear(0.108 * math.copysign(abs(cs) ** (2 / 3), cs), 0.465 + 0.150 * math.copysign(abs(sn) ** (2 / 3), sn)), 0.465 + 0.150 * math.copysign(abs(sn) ** (2 / 3), sn)))
+        tp.append((shear(tbw * math.copysign(abs(cs) ** (2 / 3), cs), 0.465 + tbh * math.copysign(abs(sn) ** (2 / 3), sn)), 0.465 + tbh * math.copysign(abs(sn) ** (2 / 3), sn)))
     pen.poly([(X(x), Yb(y)) for x, y in tp], shirt, ow)
     if ch.get("overalls"):
         bib = [(shear(x, y), y) for x, y in rrect_pts(-0.060, 0.50, 0.060, 0.33, 0.02, 4)]
@@ -444,9 +526,15 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     if not ch.get("overalls") and style != "hoodie":                              # belt + buckle
         pen.line([(X(shear(-0.078, 0.343)), Yb(0.343)), (X(shear(0.078, 0.343)), Yb(0.343))], 0.016 * H, (58, 42, 34), ow * 0.5)
         pen.poly([(X(shear(x, y)), Yb(y)) for x, y in rrect_pts(-0.014, 0.352, 0.014, 0.334, 0.004, 2)], (226, 190, 80), ow * 0.3)
+    # ---- held prop: grip point dono haathon ke beech ke markaz par (peeche wala haath prop ke peeche, aage wala upar)
+    if hd and hd["al"] is not None:
+        lh_, rh_ = po["lh"], po["rh"]
+        mx = (X(lh_[0] + lean * 0.5) + X(rh_[0] + lean * 0.5)) / 2
+        my = (Yb(lh_[1]) + Yb(rh_[1])) / 2
+        pen.paste(hd["rgb"], hd["al"], mx * pen.ss - hd["gx"], my * pen.ss - hd["gy"])
     # ---- head (thoda lag ke saath => secondary motion)
-    hx = shear(0.0, 0.60) * 1.0 + po["tilt"] * 0.6 - lean * 0.15
-    hc = (X(hx), Yb(0.77 + po["nod"]))
+    hx = shear(0.0, 0.60) * 1.0 + po_l["tilt"] * 0.6 - lean * 0.15 + (po_l["lean"] - lean) * 0.35
+    hc = (X(hx), fy - (0.77 + po["nod"] + 0.0025 * br + po_l["bob"] + jump) * H * sy)
     r = 0.188 * H
     pen.circle(hc, r, SKIN, ow)
     x0, x1 = int(hc[0] * pen.ss - r * pen.ss - 4), int(hc[0] * pen.ss + r * pen.ss + 4)
@@ -498,20 +586,18 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
     if action in ("shock", "scream") and t < 0.5:
         eye_o, brow_l = max(eye_o, 1.12), max(brow_l, 0.3)
     ey = hc[1] + 0.012 * H
-    blink = 1.0
-    ph = (t * 0.4 + blink_seed) % 3.2
-    if ph < 0.13 and eye_o > 0.5:
-        blink = 0.08
+    blink = blink_open(t, blink_seed) if eye_o > 0.5 else 1.0       # natural blink: random waqt, naram band/khulna
     fxs = d * 0.018 * H            # chehra facing ki taraf (3D turn effect)
-    lk = d * 0.010 * H * look
+    lk = d * 0.010 * H * look + d * 0.0035 * H * math.sin(t * 0.9 + blink_seed)       # nazar mein halki, dheemi harkat
     for sgn in (-1, 1):
         cx = hc[0] + sgn * ex * H + fxs
-        if eye_o < 0.3 or blink < 0.5:
+        if eye_o < 0.3 or blink < 0.22:
             pen.line([(cx - 0.02 * H, ey), (cx, ey + 0.008 * H), (cx + 0.02 * H, ey)], lw * 0.9)
         else:
             pen.ellipse((cx + lk, ey), 0.0125 * H, 0.0155 * H * min(1.5, eye_o) * blink, (30, 24, 34), 0)
-            pen.circle((cx + lk + 0.003 * H, ey - 0.004 * H * eye_o), 0.0032 * H, (255, 255, 255))
-        by = ey - 0.054 * H - brow_l * 0.024 * H - (0.006 * H if mouth > 0.5 else 0)
+            if blink > 0.5:
+                pen.circle((cx + lk + 0.003 * H, ey - 0.004 * H * eye_o), 0.0032 * H, (255, 255, 255))
+        by = ey - 0.054 * H - brow_l * 0.024 * H - (0.006 * H if mouth > 0.5 else 0) + (1.0 - blink) * 0.005 * H
         outer = (cx + sgn * 0.027 * H, by - brow_t * 0.010 * H)
         inner = (cx - sgn * 0.027 * H, by + brow_t * 0.016 * H)
         pen.line([outer, inner], lw * 0.9)
@@ -540,8 +626,8 @@ def draw_char(pen, fx, fy, H, ch, action, emo, t, mouth, vis, talk, look, facing
         sx_ = hc[0] - d * r * 0.78
         sd = (t * 1.2) % 1.0 * 0.05 * H if emo == "cry" else 0.0
         pen.poly([(sx_, hc[1] - r * 0.1 + sd), (sx_ + 0.012 * H, hc[1] + r * 0.08 + sd), (sx_, hc[1] + r * 0.22 + sd), (sx_ - 0.012 * H, hc[1] + r * 0.08 + sd)], (130, 190, 240), ow * 0.3)
-    # ---- front arm
-    arm(rsh, po["rh"], 1, action == "point")
+    # ---- front arm (prop ke upar, taake haath prop ko pakadta dikhe)
+    arm(rsh, po["rh"], 1, action == "point" and hd is None)
 
 
 def shift_mask(a, dx, dy):
@@ -550,9 +636,10 @@ def shift_mask(a, dx, dy):
 
 
 def render_char(frame_w, frame_h, fx, fy, H, ch, action, emo, t, mouth, facing, enter, seed, amb=(1, 1, 1), rim=(0, 0, 0),
-                ls=-1, vis=0, talk=0.0, look=0.0, key=(1.0, 0.95, 0.85), bounce=(0.6, 0.5, 0.4)):
+                ls=-1, vis=0, talk=0.0, look=0.0, key=(1.0, 0.95, 0.85), bounce=(0.6, 0.5, 0.4), energy=None, held=None):
     """Char ko frame-size window mein (clipped bbox) draw karke (rgb, alpha, x0, y0) deta hai. Light: amb (rang+exposure),
-    key (light wali taraf ka rang), bounce (zameen se wapas aati roshni), rim (kinare ki chamak, light ki taraf)."""
+    key (light wali taraf ka rang), bounce (zameen se wapas aati roshni), rim (kinare ki chamak, light ki taraf).
+    energy: awaaz ki smooth energy (gesture ke liye), held: haathon mein prop (draw_char/prep_held dekhein)."""
     x0 = int(max(0, fx - 0.7 * H))
     x1 = int(min(frame_w, fx + 0.7 * H))
     y0 = int(max(0, fy - 1.25 * H))
@@ -561,7 +648,7 @@ def render_char(frame_w, frame_h, fx, fy, H, ch, action, emo, t, mouth, facing, 
         return None
     ss = 2.0 if H < 800 else 1.5
     pen = Pen(x1 - x0, y1 - y0, ss)
-    draw_char(pen, fx - x0, fy - y0, H, ch, action, emo, t, mouth, vis, talk, look, facing, enter, seed, ls)
+    draw_char(pen, fx - x0, fy - y0, H, ch, action, emo, t, mouth, vis, talk, look, facing, enter, seed, ls, energy=energy, held=held)
     bx, by, bw_, bh_ = cv2.boundingRect(pen.m)
     if bw_ == 0 or bh_ == 0:
         return None
