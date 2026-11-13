@@ -3,6 +3,7 @@ Characters upar se code (rick.py) draw karta hai, isliye har scene mein wahi cha
 Ek location ki image ke alag-alag crops/flip se kai scenes banti hain (kam images = tez + ek jaisi duniya).
 Image na mile to code se banaya hua fallback environment (zameen + aasman + ghar)."""
 import hashlib
+import math
 import os
 import time
 import urllib.parse
@@ -14,29 +15,52 @@ import requests
 import depth as depthmod
 
 W, H = 1080, 1920
-STYLE = ("stylized 3D rendered cartoon diorama, clay-and-plastic toy look, Pixar-like soft global illumination, warm sunny daylight, "
-         "rich saturated colours, detailed props and buildings, miniature tilt-shift depth of field, clean readable shapes, "
+STYLE = ("stylized 3D rendered cartoon diorama, clay-and-plastic toy look, Pixar-like soft global illumination, "
+         "warm golden-hour sunlight with a soft directional key light and gentle rim light, long soft shadows, "
+         "rich warm saturated colours, subtle atmospheric haze for depth, detailed props and buildings, miniature tilt-shift depth of field, clean readable shapes, "
          "clear depth layers (foreground ground, mid-ground buildings, distant horizon) for 3D parallax, large flat open ground in the lower half of the frame, camera at eye level, EMPTY scene with no people and no characters, "
          "vertical 9:16 composition, no text, no letters, no logo, no watermark")
 CACHE = "bgcache"
 IMG_BUDGET = float(os.environ.get("IMG_BUDGET_SEC", "900"))     # itne seconds ke baad naye images mangna band (fallback use hoga)
+LIGHT = float(os.environ.get("BG_LIGHT", "1.0"))                # garam roshni ki shiddat (0 = band, 1 = default, 1.4 = zyada)
+_STYLE_ID = hashlib.md5(STYLE.encode()).hexdigest()[:6]         # STYLE badle to purani cache apne aap invalid
 _fails, _t0 = 0, None
+
+
+def _valid(img):
+    """Pollinations kabhi kabhi saaf/kharab/placeholder image deta hai -> usse background nahi banate (flicker/blank frames)."""
+    return img is not None and img.ndim == 3 and img.shape[0] > 400 and float(img.std()) > 14.0
+
+
+def _fit916(img):
+    """Sab images ek hi 9:16 shape mein (centre crop) taake har scene ke crops/zoom barabar rahein."""
+    h, w = img.shape[:2]
+    target = W / H
+    cur = w / h
+    if abs(cur - target) < 0.01:
+        return img
+    if cur > target:
+        nw = int(round(h * target))
+        x0 = (w - nw) // 2
+        return img[:, x0:x0 + nw]
+    nh = int(round(w / target))
+    return img[h - nh:, :]                                      # neeche se: zameen frame mein rahe
 
 
 def fetch(prompt, seed, tries=3):
     global _fails, _t0
-    if os.environ.get("BG_OFFLINE") or _fails >= 3:      # Pollinations down hai -> baaqi scenes mein waqt zaya nahi
+    os.makedirs(CACHE, exist_ok=True)
+    key = hashlib.md5(f"{prompt}{seed}{_STYLE_ID}".encode()).hexdigest()[:12]
+    path = os.path.join(CACHE, key + ".jpg")
+    if os.path.exists(path):                                    # cache pehle: Pollinations down ho tab bhi sab scenes ek jaisi duniya
+        img = cv2.imread(path)
+        if _valid(img):
+            return _fit916(img)
+    if os.environ.get("BG_OFFLINE") or _fails >= 3:             # Pollinations down hai -> baaqi scenes mein waqt zaya nahi
         return None
     _t0 = _t0 or time.time()
     if time.time() - _t0 > IMG_BUDGET:
         return None
-    os.makedirs(CACHE, exist_ok=True)
-    key = hashlib.md5(f"{prompt}{seed}".encode()).hexdigest()[:12]
-    path = os.path.join(CACHE, key + ".jpg")
-    if os.path.exists(path):
-        img = cv2.imread(path)
-        if img is not None:
-            return img
     q = urllib.parse.quote(f"{prompt[:700]}, {STYLE}")
     for k in range(tries):
         url = (f"https://image.pollinations.ai/prompt/{q}?width=768&height=1344&seed={seed + k * 17}"
@@ -45,10 +69,12 @@ def fetch(prompt, seed, tries=3):
             r = requests.get(url, timeout=75)
             if r.status_code == 200 and len(r.content) > 20000:
                 img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
-                if img is not None and img.shape[0] > 400:
-                    cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                if _valid(img):
+                    tmp = os.path.join(CACHE, key + ".tmp.jpg")     # atomic write: aadhi file cache mein nahi jaati
+                    cv2.imwrite(tmp, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    os.replace(tmp, path)
                     _fails = 0
-                    return img
+                    return _fit916(img)
             elif r.status_code == 429:                   # rate limit -> thoda ruk kar dobara
                 time.sleep(12 * (k + 1))
                 continue
@@ -116,9 +142,11 @@ def tiltshift(img):
 
 
 def grade(img):
-    """Bright, saaf, saturated cartoon grade (BGR): halka contrast + saturation, garam highlights."""
+    """Bright, saaf, saturated cartoon grade (BGR): halka contrast + saturation, garam highlights.
+    CLAHE 70% hi lagta hai (halo/tile-seam kam)."""
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    lab[..., 0] = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(6, 8)).apply(lab[..., 0])
+    eq = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(6, 8)).apply(lab[..., 0])
+    lab[..., 0] = cv2.addWeighted(eq, 0.7, lab[..., 0], 0.3, 0)
     f = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype(np.float32) / 255.0
     g = f.mean(axis=2, keepdims=True)
     f = g + (f - g) * 1.14
@@ -129,16 +157,66 @@ def grade(img):
     return np.clip(f * 255, 0, 255).astype(np.uint8)
 
 
+def relight(img, seed=0):
+    """Garam, gehri roshni - sab STATIC (frame-to-frame flicker nahi): split-tone (garam highlights / gehre shadows),
+    sooraj ka sunehri glow + halki kirnein, ufuq par aerial haze, neeche gehri zameen, garam vignette,
+    highlights ka bloom, aur banding rokne ke liye fixed dither. BGR uint8 in/out."""
+    k = LIGHT
+    if k <= 0:
+        return img
+    h, w = img.shape[:2]
+    rnd = np.random.RandomState(int(seed) % (2 ** 31 - 8) + 7)
+    f = img.astype(np.float32) / 255.0
+    lum = f[..., 0] * 0.114 + f[..., 1] * 0.587 + f[..., 2] * 0.299
+    yy = np.linspace(0, 1, h, dtype=np.float32)[:, None]
+    xx = np.linspace(0, 1, w, dtype=np.float32)[None, :]
+    gold = np.array([0.30, 0.60, 1.0], np.float32)                                  # BGR sunehri
+
+    t = np.clip(lum, 0, 1)[..., None] ** 1.1                                        # 1) split-tone
+    sh = np.array([1.03, 0.97, 0.98], np.float32)
+    hi = np.array([0.90, 1.00, 1.09], np.float32)
+    f = np.clip(f * (1 + ((sh + (hi - sh) * t) - 1) * k), 0, 1)
+
+    sx = float(rnd.uniform(0.2, 0.8))                                               # 2) sooraj ka glow (screen blend)
+    d = np.sqrt(((xx - sx) * 0.85) ** 2 + ((yy + 0.04) * 0.55) ** 2)
+    glow = np.exp(-(d / 0.45) ** 2)
+    f = 1 - (1 - f) * (1 - glow[..., None] * gold * 0.30 * k)
+
+    ang = (xx - sx) / (yy + 0.30)                                                   # 3) halki kirnein
+    rays = 0.5 + 0.5 * np.sin(ang * 13.0 + float(rnd.uniform(0, 6.28)))
+    rays = cv2.GaussianBlur((rays ** 3).astype(np.float32), (0, 0), max(2.0, w / 90))
+    rays = rays * np.clip(1.0 - yy * 1.15, 0, 1) * np.exp(-(d / 0.9) ** 2)
+    f = 1 - (1 - f) * (1 - rays[..., None] * gold * 0.16 * k)
+
+    band = (np.exp(-(((yy - 0.47) / 0.13) ** 2)) * 0.15 * k)[..., None]             # 4) ufuq par garam haze (door = dhundhla)
+    f = f * (1 - band) + np.array([0.78, 0.90, 1.0], np.float32) * band
+
+    f = f * (1 - (np.clip((yy - 0.55) / 0.45, 0, 1) * 0.12 * k)[..., None])         # 5) foreground thoda gehra = zameen par jamta hai
+
+    vig = np.clip(((xx - 0.5) / 0.5) ** 2 * 0.55 + ((yy - 0.5) / 0.5) ** 2 * 0.45, 0, 1) ** 1.6   # 6) garam (bhoora) vignette
+    f = f * (1 - vig[..., None] * np.array([0.36, 0.29, 0.22], np.float32) * k)
+
+    f = np.clip(f, 0, 1)                                                            # 7) bloom
+    bright = (np.clip(lum - 0.70, 0, 1) / 0.30)[..., None]
+    bloom = cv2.GaussianBlur((f * bright).astype(np.float32), (0, 0), max(3.0, w / 38))
+    f = 1 - (1 - f) * (1 - np.clip(bloom * np.array([0.55, 0.85, 1.0], np.float32) * 0.22 * k, 0, 1))
+
+    f = f + rnd.randn(h, w, 1).astype(np.float32) * (0.8 / 255.0)                   # 8) fixed dither (sky banding/shimmer khatam)
+    return np.clip(f * 255.0 + 0.5, 0, 255).astype(np.uint8)
+
+
 def get_location(prompt, seed):
-    """Ek location: (khaali background BGR graded + tilt-shift, depth map float32 0..1). Pollinations -> na mile to procedural.
-    Depth sirf ek baar nikalti hai (depthcache/ mein cache)."""
+    """Ek location: (khaali background BGR graded + garam roshni + tilt-shift, depth map float32 0..1). Pollinations -> na mile to procedural.
+    Depth sirf ek baar nikalti hai (depthcache/ mein cache), neutral grade wali image par - roshni ke baad nahi."""
     img = fetch(prompt, seed)
     if img is None:
         print("  -> fallback procedural bg", flush=True)
         img = procedural(seed)
     img = grade(img)
     dep = depthmod.estimate(img)
-    return tiltshift(img), dep
+    if dep.shape[:2] != img.shape[:2]:                   # depth aur image ka size alag ho to crops mismatch hote (glitch)
+        dep = cv2.resize(dep, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
+    return tiltshift(relight(img, seed)), dep
 
 
 # (zoom, x-anchor 0..1, flip): ek hi location ke alag "camera angle" - bottom-anchored taake zameen frame ke neeche rahe
@@ -156,12 +234,12 @@ def view(loc, k, shot="medium"):
     if flip:
         base, dep = cv2.flip(base, 1), cv2.flip(dep, 1)
     h, w = base.shape[:2]
-    ch, cw = int(h / z), int(w / z)
+    ch, cw = max(1, int(h / z)), max(1, int(w / z))
     y0, x0 = h - ch, int((w - cw) * ax)
     base, dep = base[y0:y0 + ch, x0:x0 + cw], dep[y0:y0 + ch, x0:x0 + cw]
     h, w = base.shape[:2]
     s = max(W / w, H / h)
-    nw, nh = int(round(w * s)), int(round(h * s))
+    nw, nh = max(W, int(math.ceil(w * s))), max(H, int(math.ceil(h * s)))   # round() se kabhi W-1/H-1 ban kar frame chhota nikalta tha
     rgb = cv2.resize(base, (nw, nh), interpolation=cv2.INTER_CUBIC)
     dp = cv2.resize(dep, (nw, nh), interpolation=cv2.INTER_LINEAR)
     ox, oy = (nw - W) // 2, nh - H
