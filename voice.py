@@ -3,15 +3,65 @@ import asyncio
 import os
 import re
 import subprocess
+import unicodedata
 import wave
 
 import numpy as np
 
 SR = 24000
 VOICE = os.environ.get("KOKORO_VOICE", "am_adam")
-SPEED = float(os.environ.get("VOICE_SPEED", "1.08"))
+SPEED = float(os.environ.get("VOICE_SPEED", "1.03"))          # 1.08 par lafz dab jaate the -> thoda dheema = saaf
 EDGE_VOICE = os.environ.get("EDGE_VOICE", "en-US-AndrewNeural")
 _pipe = None
+
+# Kokoro (misaki) ke liye saaf talaffuz: [lafz](/phonemes/). Default American "water" mein 't' flap ('d' jaisa) ho jata hai.
+# Naye lafz yahan add kar sakte hain.
+PRON = {
+    "water": "wˈɔtɚ",
+    "waters": "wˈɔtɚz",
+    "watery": "wˈɔtɚɹi",
+}
+_PRON_RE = re.compile(r"\b(" + "|".join(sorted(map(re.escape, PRON), key=len, reverse=True)) + r")\b", re.I)
+
+
+def _kokoro_markup(text):
+    return _PRON_RE.sub(lambda m: f"[{m.group(0)}](/{PRON[m.group(0).lower()]}/)", text)
+
+
+def clean_text(text):
+    """TTS ko ulta-seedha karne wali cheezein hataata hai: emoji, markdown, '...', '—', '!!', adhoori punctuation."""
+    t = unicodedata.normalize("NFKC", text)
+    t = t.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
+    t = re.sub(r"[\u2013\u2014]+", ", ", t)
+    t = re.sub(r"\s-\s", ", ", t)
+    t = t.replace("&", " and ").replace("%", " percent").replace("/", " ")
+    t = re.sub(r"[^\w\s.,!?;:'\"()\-$]", " ", t)                 # emoji / markdown / ajeeb symbols
+    lines = []
+    for ln in t.split("\n"):
+        ln = re.sub(r"\s*\.{2,}\s*", ", ", ln)                    # "..." -> chhota saaf pause
+        ln = re.sub(r"([!?.,;:])\1+", r"\1", ln)
+        ln = re.sub(r"([!?])[.!?]+", r"\1", ln)
+        ln = re.sub(r"\s+([.,!?;:])", r"\1", ln)
+        ln = re.sub(r"\s+", " ", ln).strip(" ,;:-")
+        if not ln:
+            continue
+        tail = ln.rstrip("\"')")
+        if not tail or tail[-1] not in ".!?":                     # jumla poora ho -> awaaz beech mein nahi atakti
+            ln += "."
+        lines.append(ln)
+    return "\n".join(lines) or text.strip()
+
+
+def _fade(x, sr, ms_in=6, ms_out=25):
+    """Shuru/aakhir mein chhota fade -> click/pop khatam."""
+    x = np.array(x, dtype=np.float32, copy=True)
+    a = min(len(x) // 2, int(sr * ms_in / 1000))
+    b = min(len(x) // 2, int(sr * ms_out / 1000))
+    if a > 1:
+        x[:a] *= np.linspace(0, 1, a, dtype=np.float32)
+    if b > 1:
+        x[-b:] *= np.linspace(1, 0, b, dtype=np.float32)
+    return x
 
 
 def _kokoro(text, path):
@@ -20,9 +70,24 @@ def _kokoro(text, path):
     import soundfile as sf
     if _pipe is None:
         _pipe = KPipeline(lang_code="a")
-    parts = []
-    for _, _, audio in _pipe(text, voice=VOICE, speed=SPEED, split_pattern=r"\n+"):
-        parts.append(np.asarray(audio, dtype=np.float32))
+    gap = np.zeros(int(0.08 * SR), np.float32)
+
+    def run(t):
+        parts = []
+        for _, _, audio in _pipe(t, voice=VOICE, speed=SPEED, split_pattern=r"\n+"):
+            a = audio.detach().cpu().numpy() if hasattr(audio, "detach") else audio
+            a = np.asarray(a, dtype=np.float32).reshape(-1)
+            if len(a) == 0:
+                continue
+            if parts:
+                parts.append(gap)
+            parts.append(_fade(a, SR, 4, 12))
+        return parts
+
+    try:
+        parts = run(_kokoro_markup(text))
+    except Exception:                                             # purana kokoro/misaki markup na samjhe to seedha text
+        parts = run(text)
     if not parts:
         raise RuntimeError("kokoro: no audio")
     sf.write(path, np.concatenate(parts), SR)
@@ -59,6 +124,7 @@ def engines():
 
 def synth(text, path, engine):
     """Ek hi engine (ek hi awaaz). Do baar koshish, phir error (build() poori video agle engine se dobara banata hai)."""
+    text = clean_text(text)
     err = None
     for _ in range(2):
         try:
@@ -80,12 +146,44 @@ def read(path):
     return x, sr
 
 
-def trim(x, sr, thr=0.012):
+def trim(x, sr, thr=0.006):
+    """Threshold kam: 'w', 'th', 'f' jaisi halki shuruaati awaazein (jaise 'water' ka 'w') kat'ti nahi. DC hata kar fade lagata hai."""
+    if len(x) == 0:
+        return x, 0.0, 0.0
+    x = x - float(np.mean(x))
     idx = np.where(np.abs(x) > thr)[0]
     if len(idx) == 0:
         return x, 0.0, len(x) / sr
-    a, b = max(0, idx[0] - int(0.03 * sr)), min(len(x), idx[-1] + int(0.08 * sr))
-    return x[a:b], 0.0, (b - a) / sr
+    a, b = max(0, idx[0] - int(0.04 * sr)), min(len(x), idx[-1] + int(0.06 * sr))
+    x = _fade(x[a:b], sr, 8, 30)
+    return x, 0.0, len(x) / sr
+
+
+def squeeze_silences(x, sr, thr=0.004, max_pause=0.22, win=0.01):
+    """Jumlon ke beech lambe pause (kokoro/edge aksar 0.4s+ chhorte hain) ko max_pause tak chhota karta hai."""
+    hop = int(sr * win)
+    n = len(x) // hop
+    if n < 3:
+        return x
+    rms = np.sqrt((x[: n * hop].reshape(n, hop) ** 2).mean(axis=1))
+    quiet = rms < thr
+    keep = np.ones(n, bool)
+    maxf = int(max_pause / win)
+    i = 0
+    while i < n:
+        if quiet[i]:
+            j = i
+            while j < n and quiet[j]:
+                j += 1
+            run = j - i
+            if run > maxf:
+                s = i + maxf // 2
+                keep[s:s + (run - maxf)] = False
+            i = j
+        else:
+            i += 1
+    mask = np.repeat(keep, hop)
+    return np.concatenate([x[: n * hop][mask], x[n * hop:]])
 
 
 def _syl(w):
@@ -165,7 +263,7 @@ def build(scenes, tmp, fps=30, **kw):
     raise RuntimeError("voice fail: " + " | ".join(errs))
 
 
-def _build(eng, scenes, tmp, fps=30, gap=0.14, lead=0.35, tail=0.5):
+def _build(eng, scenes, tmp, fps=30, gap=0.10, lead=0.25, tail=0.40):
     """Har scene: wav banata hai, scene ki 'hold' = voice length + gap. Returns (voice_mix_array@SR, per-scene info)."""
     chunks, info, t = [], [], 0.0
     for i, sc in enumerate(scenes):
@@ -174,7 +272,9 @@ def _build(eng, scenes, tmp, fps=30, gap=0.14, lead=0.35, tail=0.5):
         x, sr = read(p)
         if sr != SR:
             x = np.interp(np.linspace(0, len(x), int(len(x) * SR / sr), endpoint=False), np.arange(len(x)), x).astype(np.float32)
-        x, _, d = trim(x, SR)
+        x, _, _ = trim(x, SR)
+        x = squeeze_silences(x, SR)
+        d = len(x) / SR
         pre = lead if i == 0 else 0.0
         post = tail if i == len(scenes) - 1 else gap
         hold = pre + d + post
