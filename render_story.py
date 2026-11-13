@@ -1,7 +1,9 @@
 """script.json -> output.mp4 (Short 1080x1920, 30fps): "parable explainer" 2.5D animation.
 Har scene = khaali AI background + uska DEPTH MAP (depth.py) -> camera dolly/orbit mein pixels depth ke hisaab se alag speed se hilte hain (parallax)
 + code se draw ANIMATED characters (rick.py) aur flat-vector PROPS (props.py: murgi, barrel, chalkboard, sikke...) jo usi parallax ke saath chalte hain
-+ tilt-shift/DOF, light-shaft, dust, bloom + hard cuts + word-by-word captions + music + sfx."""
++ tilt-shift/DOF, light-shaft, dust, bloom + hard cuts + word-by-word captions + music + sfx.
+v4: characters har frame par naye (animation on ones, ANIM_STEP=2 se purana 'on twos'), sprites sub-pixel position par (1px jhatka nahi),
+awaaz ki smooth energy se gesture, aur HELD props (action 'hold' wale character ke haathon mein) rick.py ke andar draw hote hain."""
 import bisect
 import faulthandler
 import json
@@ -29,6 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FPS = 30
 W, H = 1080, 1920
 SW, SH = W // 4, H // 4
+ANIM_STEP = max(1, int(os.environ.get("ANIM_STEP", "1")))           # 1 = har frame par nayi pose (smooth); 2 = purana 'on twos' (tez render)
 YELLOW, WHITE = (255, 214, 40), (255, 255, 255)
 IMPACT = {"thud", "gasp", "alarm", "knock", "buzz", "scratch"}      # in sfx par camera ko halka jhatka
 FONTS = [os.path.join(HERE, "fonts", "Poppins-Bold.ttf"), "/usr/share/fonts/opentype/montserrat/Montserrat-ExtraBold.otf",
@@ -39,6 +42,15 @@ POS_ORDER = {"left": 0, "center": 1, "right": 2}
 SHOT_H = {"wide": (560, 520, 460), "medium": (900, 780, 640), "close": (1900, 1350, 1000)}
 SHOT_TOP = {"medium": 0.34, "close": 0.17}                           # sar ka upar wala hissa (frame ka fraction); wide = zameen par (fy=1690)
 SLOTS = {1: {"left": 0.32, "center": 0.5, "right": 0.68}, 2: [0.27, 0.73], 3: [0.19, 0.5, 0.81]}
+# Jo props haathon mein pakde ja sakte hain: h = prop ki unchai (character H ka hissa), gx/gy = grip point (prop bbox ka fraction, upar-baayen se),
+# hy = haathon ki unchai (H-units), fwd = prop ka markaz body se kitna aage. Prop ka asli size sprite se naapa jata hai (props.py nahi badla).
+HOLD = {
+    "barrel": dict(h=0.34, gx=0.5, gy=0.50, hy=0.40, fwd=0.11),
+    "chicken": dict(h=0.26, gx=0.5, gy=0.60, hy=0.39, fwd=0.12),
+    "eggs": dict(h=0.17, gx=0.5, gy=0.75, hy=0.37, fwd=0.12),
+    "coins": dict(h=0.15, gx=0.5, gy=0.80, hy=0.37, fwd=0.12),
+    "moneybag": dict(h=0.28, gx=0.5, gy=0.62, hy=0.39, fwd=0.11),
+}
 _fonts = {}
 
 
@@ -65,6 +77,13 @@ def back(x):
     return 1 + 2.70158 * x ** 3 + 1.70158 * x ** 2
 
 
+def quant(t):
+    """Animation ka waqt: ANIM_STEP=1 mein bilkul continuous (har frame nayi pose), warna har ANIM_STEP-wi frame par."""
+    if ANIM_STEP <= 1:
+        return t
+    return (int(t * FPS) // ANIM_STEP * ANIM_STEP) / FPS
+
+
 def blit(frame, spr, cx, cy, scale=1.0, alpha=1.0):
     if scale != 1.0:
         spr = cv2.resize(spr, (max(2, int(spr.shape[1] * scale)), max(2, int(spr.shape[0] * scale))), interpolation=cv2.INTER_LINEAR)
@@ -89,6 +108,25 @@ def blend_rgba(frame, rgb, a, X0, Y0, alpha=1.0):
     aa = a[ya - y0:yb - y0, xa - x0:xb - x0, None] * alpha
     reg = frame[ya:yb, xa:xb].astype(np.float32)
     frame[ya:yb, xa:xb] = np.clip(reg * (1 - aa) + rgb[ya - y0:yb - y0, xa - x0:xb - x0] * aa, 0, 255).astype(np.uint8)
+
+
+def place(frame, rgb, a, X0, Y0, ze=1.0, alpha=1.0):
+    """Sprite ko SUB-PIXEL position + scale ze par frame mein milata hai (ek hi resample). Pehle position integer pixel par round hoti thi
+    => chalte/hilte character mein 1px ka jhatka (jitter) aata tha."""
+    h, w = a.shape
+    ix, iy = int(math.floor(X0)), int(math.floor(Y0))
+    fx_, fy_ = X0 - ix, Y0 - iy
+    nw, nh = int(math.ceil(w * ze + fx_)) + 1, int(math.ceil(h * ze + fy_)) + 1
+    if nw < 2 or nh < 2 or nw > 4 * W or nh > 4 * H:
+        return
+    if ix >= W or iy >= H or ix + nw <= 0 or iy + nh <= 0:
+        return
+    M = np.array([[ze, 0, fx_ + 0.5 * (ze - 1)], [0, ze, fy_ + 0.5 * (ze - 1)]], np.float32)
+    rgb2 = cv2.warpAffine(np.ascontiguousarray(rgb, np.float32), M, (nw, nh), flags=cv2.INTER_LINEAR,
+                          borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    a2 = cv2.warpAffine(np.ascontiguousarray(a, np.float32), M, (nw, nh), flags=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    blend_rgba(frame, rgb2, np.clip(a2, 0.0, 1.0), ix, iy, alpha)
 
 
 # ---------------------------------------------------------------- captions (ek-ek bada word: safed + kaala outline + soft shadow)
@@ -312,25 +350,25 @@ def layout_props(sc, actors, Hc):
     slots = {"left": 0.17 * W, "center": 0.5 * W, "right": 0.83 * W}
     occupied_ids = set()
     for j, p in enumerate(sc.get("props") or []):
-        t, place, act, txt = p["type"], p.get("place", "right"), p.get("action", "idle"), p.get("text", "")
+        t, place_, act, txt = p["type"], p.get("place", "right"), p.get("action", "idle"), p.get("text", "")
         seed = zlib.crc32((t + txt + str(j)).encode()) % 1000
         if t == "hand":
-            x = {"left": 0.30, "center": 0.5, "right": 0.70}.get(place, 0.5) * W
+            x = {"left": 0.30, "center": 0.5, "right": 0.70}.get(place_, 0.5) * W
             out.append(dict(type=t, x=x, fy=0.30 * H, U=0.42 * W, plane="hand", dir=1, action=act, text=txt, seed=seed, delay=0.0, speed=0.0, d=0.93))
             continue
-        plane = "back" if (place == "back" or (t in BACK_TYPES and place not in ("front",))) else ("front" if place == "front" else "side")
+        plane = "back" if (place_ == "back" or (t in BACK_TYPES and place_ not in ("front",))) else ("front" if place_ == "front" else "side")
         U = Ub * PROP_K.get(t, 1.0) * (0.75 if plane == "back" else 1.0)
         if t == "barrel" and act == "occupied":                              # character barrel ke andar
             cands = [a for a in actors if a["id"] == txt.strip().lower() and a["id"] not in occupied_ids] or \
                     [a for a in actors if a["id"] not in occupied_ids] or actors
-            a = min(cands, key=lambda a_: abs(a_["x"] - slots.get(place, a_["x"])))
+            a = min(cands, key=lambda a_: abs(a_["x"] - slots.get(place_, a_["x"])))
             occupied_ids.add(a["id"])
             out.append(dict(type=t, x=a["x"], fy=a["fy"] + 0.012 * a["H"], U=a["H"], plane="front", dir=1, action=act, text="", seed=seed, delay=0.0, speed=0.0))
             continue
         if plane == "front":
             cands = [0.5 * W, 0.24 * W, 0.76 * W]
         else:
-            cands = [slots.get(place, slots["right"])] + [v for k_, v in slots.items() if k_ != place]
+            cands = [slots.get(place_, slots["right"])] + [v for k_, v in slots.items() if k_ != place_]
         x = max(cands, key=lambda c_: (min([abs(c_ - tx) for tx in taken] + [W]) >= (0.17 * W if plane != "front" else 0.12 * W)) * 10000
                 - cands.index(c_) * 100 + min([abs(c_ - tx) for tx in taken] + [W]) * 0.01)
         taken.append(x)
@@ -339,6 +377,36 @@ def layout_props(sc, actors, Hc):
         out.append(dict(type=t, x=x, fy=min(fy, 1860.0), U=U, plane=plane, dir=d, action=act, text=txt, seed=seed, delay=0.12 * (j + 1),
                         speed=props.PROPS[t]["speed"] * MOVE_SPEED.get(act, 0.0) if act in MOVE_SPEED else 0.0))
     return out
+
+
+def assign_held(sc, actors, plist):
+    """Jo character 'hold' action mein hai (ya prop mein held_by: "<character id>" likha ho) uske haathon mein sabse qareeb ka holdable prop
+    (HOLD mein) de deta hai. Aisa prop alag se draw nahi hota - rick.py usse haathon ke saath draw karta hai.
+    plist[j] sc['props'][j] se match karta hai (layout_props har prop ke liye ek entry banata hai)."""
+    raw = sc.get("props") or []
+    busy = set()
+
+    def pick(p, pr):
+        hb = str(pr.get("held_by", "")).strip().lower()
+        if hb:
+            for k, a in enumerate(actors):
+                if a["id"].lower() == hb and k not in busy:
+                    return k
+        cands = [k for k, a in enumerate(actors) if a["action"] == "hold" and k not in busy]
+        if not cands:
+            return None
+        return min(cands, key=lambda k: abs(actors[k]["x"] - p["x"]))
+
+    for j, p in enumerate(plist):
+        pr = raw[j] if j < len(raw) else {}
+        if p["type"] not in HOLD or p["action"] == "occupied" or p.get("speed"):
+            continue
+        k = pick(p, pr)
+        if k is None:
+            continue
+        busy.add(k)
+        p["held"] = k
+        actors[k]["held"] = j
 
 
 def shadow(frame, fxs, fys, rw, rh, strength=0.32):
@@ -377,9 +445,10 @@ class Renderer:
             lay = layout_scene(sc, prev if i else set(), self.chars, info[i]["hold"])
             self.layouts.append(lay)
             self.player.append(layout_props(sc, lay, lay[0]["H"]))
+            assign_held(sc, lay, self.player[-1])               # hold wale character ke haathon mein prop
             prev = {a["id"] for a in sc["cast"]}
         self._bg = (-1, None, None)
-        self._spr, self._pspr = {}, {}
+        self._spr, self._pspr, self._hU = {}, {}, {}
         self.groups = [caption_groups(nf["words"]) for nf in info]
 
     def bg(self, i):
@@ -398,28 +467,70 @@ class Renderer:
             self._bg = (i, wp, amb)
         return self._bg[1], self._bg[2]
 
+    def held_U(self, typ, Hc, p):
+        """Held prop ka U (props.render ka size) jisse uski unchai character ki H ka HOLD[typ]['h'] hissa ho. Ek baar probe render se naapta hai."""
+        key = (typ, int(Hc))
+        if key not in self._hU:
+            u = None
+            try:
+                r = props.render(typ, 400.0, 0.0, dict(dir=1, action=p["action"], text="", seed=p["seed"]))
+                if r is not None:
+                    al = np.asarray(r[1], np.float32)
+                    if al.size and al.max() > 1.5:
+                        al = al / 255.0
+                    ys = np.where(al.max(axis=1) > 0.08)[0] if al.size else []
+                    hb = (int(ys.max()) - int(ys.min()) + 1) if len(ys) else 0
+                    if hb > 4:
+                        u = 400.0 * HOLD[typ]["h"] * Hc / hb
+            except Exception as e:
+                print("  held prop probe err:", str(e)[:80])
+            self._hU[key] = u
+        return self._hU[key]
+
+    def held_spec(self, i, a, lt2):
+        """Actor ke haathon mein jo prop hai uska spec (rick.render_char ke liye). Haath shuru se grip par rehte hain; prop delay ke baad pop hota hai."""
+        j = a.get("held")
+        if j is None:
+            return None
+        p = self.player[i][j]
+        U = self.held_U(p["type"], a["H"], p)
+        if not U:
+            return None
+        tp = lt2 - p["delay"]
+        spec = dict(HOLD[p["type"]])
+        spec["appear"] = min(1.0, max(0.0, back(tp / 0.32)))
+
+        def rend(scale, U=U, p=p, tp=tp, d=a["dir"]):
+            return props.render(p["type"], U * scale, max(0.0, tp), dict(dir=d, action=p["action"], text=p["text"], seed=p["seed"]))
+
+        spec["render"] = rend
+        return spec
+
     def sprite(self, i, k, a, lt2, x):
-        """Actor ka sprite (har 2nd frame par naya = 'animation on twos', speed aadhi)."""
-        key = (i, k, int(round(lt2 * FPS)))
+        """Actor ka sprite (har frame naya; ANIM_STEP=2 par har 2nd frame)."""
+        key = (i, k, int(round(lt2 * 1000)))
         if key in self._spr:
             return self._spr[key]
         if len(self._spr) > 8:
             self._spr.clear()
         nf = self.info[i]
-        mouth, vis, talk = 0.0, 0, 0.0
+        mouth, vis, talk, energy = 0.0, 0, 0.0, 0.0
         if a["speaker"]:
             idx = int((lt2 - nf["env_off"]) * FPS)
-            if 0 <= idx < len(nf["env"]):
-                mouth, vis = float(nf["env"][idx]), int(nf["vis"][idx])
+            env = nf["env"]
+            if 0 <= idx < len(env):
+                mouth, vis = float(env[idx]), int(nf["vis"][idx])
+                energy = float(np.mean(env[max(0, idx - 9): idx + 1]))      # ~0.3s ka average: haath/sar awaaz ke saath jhatke nahi
             talk = 1.0
         enter = ease(lt2 / 0.45) if a["new"] else 1.0
+        held = self.held_spec(i, a, lt2)
         r = rick.render_char(W, H, x, a["fy"], a["H"], a["ch"], a["action"], a["emo"], lt2 + 0.17 * k, mouth, a["dir"], enter, a["seed"],
-                             amb=self._bg[2], rim=(0.035, 0.03, 0.02), ls=-1, vis=vis, talk=talk)
+                             amb=self._bg[2], rim=(0.035, 0.03, 0.02), ls=-1, vis=vis, talk=talk, energy=energy, held=held)
         self._spr[key] = (r, x)
         return self._spr[key]
 
     def prop_sprite(self, i, j, p, t2):
-        key = (i, j, int(round(t2 * FPS)))
+        key = (i, j, int(round(t2 * 1000)))
         if key in self._pspr:
             return self._pspr[key]
         if len(self._pspr) > 12:
@@ -432,10 +543,11 @@ class Renderer:
         wp = self._bg[1]
         for k, a in enumerate(self.layouts[i]):
             x = a["x"]
-            if a["action"] in ("walk", "run"):                  # asli chalna: speed rick.walk_speed se => paon phisalte nahi
+            walking = a["action"] in ("walk", "run")
+            if walking:                                         # asli chalna: speed rick.walk_speed se => paon phisalte nahi
                 x += a["dir"] * rick.walk_speed(a["action"]) * a["H"] * (lt - a["hold"] / 2)
-            lt2 = (int(lt * FPS) // 2 * 2) / FPS
-            xr = x - a["dir"] * rick.walk_speed(a["action"]) * a["H"] * (lt - lt2) if a["action"] in ("walk", "run") else x
+            lt2 = quant(lt)
+            xr = x - a["dir"] * rick.walk_speed(a["action"]) * a["H"] * (lt - lt2) if walking else x
             res, xs = self.sprite(i, k, a, lt2, xr)
             pop = (0.84 + 0.16 * back(lt / 0.32)) if a["new"] else 1.0
             fxs, fys, sc = wp.project(x, a["fy"], a["d"], cam["z"], cam["dolly"], cam["pan"], cam["orbit"])     # bg jaisi hi parallax
@@ -444,10 +556,7 @@ class Renderer:
             if res is None:
                 continue
             rgb, al, sx0, sy0 = res
-            if abs(ze - 1.0) > 1e-3:
-                nw, nh = max(2, int(al.shape[1] * ze)), max(2, int(al.shape[0] * ze))
-                rgb, al = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_LINEAR), cv2.resize(al, (nw, nh), interpolation=cv2.INTER_LINEAR)
-            blend_rgba(frame, rgb, al, fxs + (sx0 - xs) * ze, fys + (sy0 - a["fy"]) * ze)
+            place(frame, rgb, al, fxs + (sx0 - xs) * ze, fys + (sy0 - a["fy"]) * ze, ze)
 
     def draw_props(self, frame, i, lt, cam, planes):
         wp, amb = self._bg[1], self._bg[2]
@@ -455,6 +564,8 @@ class Renderer:
         hold = self.info[i]["hold"]
         for j, p in enumerate(self.player[i]):
             if p["plane"] not in planes:
+                continue
+            if p.get("held") is not None:                                        # haathon mein hai: rick.py draw karta hai
                 continue
             t = lt - p["delay"]
             if t < 0:
@@ -472,7 +583,7 @@ class Renderer:
                 continue
             fxs, fys, sc = wp.project(x, fy, p["d"], cam["z"], cam["dolly"], cam["pan"], cam["orbit"])
             ze = sc * pop
-            t2 = (int(t * FPS) // 2 * 2) / FPS
+            t2 = quant(t)
             res = self.prop_sprite(i, j, p, t2)
             if p["type"] != "hand":
                 shadow(frame, fxs, fys, 0.20 * p["U"] * ze * (1.6 if p["type"] in ("house", "chalkboard", "graph") else 1.0), 0.03 * p["U"] * ze, 0.28)
@@ -480,10 +591,7 @@ class Renderer:
                 continue
             rgb, al, ox, oy = res
             rgb = rgb * amb_a
-            if abs(ze - 1.0) > 1e-3:
-                nw, nh = max(2, int(al.shape[1] * ze)), max(2, int(al.shape[0] * ze))
-                rgb, al = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_LINEAR), cv2.resize(al, (nw, nh), interpolation=cv2.INTER_LINEAR)
-            blend_rgba(frame, rgb, al, fxs + ox * ze, fys + oy * ze)
+            place(frame, rgb, al, fxs + ox * ze, fys + oy * ze, ze)
 
     def frame(self, f):
         tg = f / FPS
