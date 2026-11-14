@@ -7,7 +7,7 @@ collar/polo/hoodie/stripe shirts, belt, jeans cuff, shoes (toe cap + laces). Pic
  - light: scene ki light direction (ls), key/fill, ground bounce, directional rim light
 v4: smooth motion (overshoot naram, sar/gardan ka follow-through, awaaz ki smooth energy se gesture), asli saans (seena phoolta hai),
 natural blink (random waqt, naram band/khulna, kabhi double-blink) + aankhon ki halki harkat, aur HELD PROPS: prop haathon ke
-bilkul beech grip point par, peeche wala haath prop ke peeche, aage wala haath prop ke upar (barrel/murgi/andey/sikke/moneybag)\"\"\"
+bilkul beech grip point par, peeche wala haath prop ke peeche, aage wala haath prop ke upar (barrel/murgi/andey/sikke/moneybag)"""
 import math
 import zlib
 
