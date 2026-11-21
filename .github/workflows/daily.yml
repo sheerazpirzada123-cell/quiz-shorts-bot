@@ -2,8 +2,8 @@ name: Daily Parable Short
 
 on:
   schedule:
-    - cron: "0 4 * * *"
-    - cron: "0 13 * * *"
+    # Har 2 din mein ek baar (day-of-month */2). Ghanta/minute random hoga script ke andar.
+    - cron: "0 0 */2 * *"
   workflow_dispatch:
     inputs:
       upload:
@@ -32,8 +32,30 @@ jobs:
       - name: Random wait (sirf scheduled run par)
         if: github.event_name == 'schedule'
         run: |
-          DELAY=$(shuf -i 0-$((MAX_DELAY_MIN * 60)) -n 1)
-          echo "Sleeping $((DELAY / 60)) min $((DELAY % 60)) sec before generating and posting"
+          # Random hour (0-23), random minute (0-59), random second (0-59) — poora din random
+          RAND_H=$((RANDOM % 24))
+          RAND_M=$((RANDOM % 60))
+          RAND_S=$((RANDOM % 60))
+          NOW_H=$(date +%H)
+          NOW_M=$(date +%M)
+          NOW_S=$(date +%S)
+
+          # Aaj ke random target time tak ke seconds nikalo (agar beet gaya to agle din ka)
+          TARGET_SEC=$(( RAND_H*3600 + RAND_M*60 + RAND_S ))
+          NOW_SEC=$(( 10#$NOW_H*3600 + 10#$NOW_M*60 + 10#$NOW_S ))
+          DELAY=$(( TARGET_SEC - NOW_SEC ))
+          if [ "$DELAY" -le 0 ]; then
+            DELAY=$(( DELAY + 86400 ))
+          fi
+
+          # Safety cap: runner minutes bachane ke liye max 6 ghante se zyada sleep mat karo
+          MAX_SLEEP=$(( 6*3600 ))
+          if [ "$DELAY" -gt "$MAX_SLEEP" ]; then
+            DELAY=$(( MAX_SLEEP ))
+          fi
+
+          echo "Random target: ${RAND_H}:${RAND_M}:${RAND_S} UTC | abhi: ${NOW_H}:${NOW_M}:${NOW_S} UTC"
+          echo "Sleeping $((DELAY / 3600))h $(( (DELAY % 3600) / 60 ))m $((DELAY % 60))s"
           sleep "$DELAY"
 
       - uses: actions/checkout@v4
