@@ -13,6 +13,8 @@ import time
 
 import requests
 
+import props as propkit      # theme lock (detect_theme / filter_props) + new aerospace props
+
 API_KEY = os.environ.get("GEMINI_API_KEY")
 MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"] if m]
 HISTORY, OUT, PLAN = "history.json", "script.json", "story_plan.md"
@@ -101,14 +103,19 @@ PROTAGONISTS = [
     "a small team racing a brutal deadline", "a curious worker who asks one uncomfortable question",
 ]
 HOOKS = [
-    "a mind-breaking puzzle question", "a high-stakes moment seconds before disaster", "a counter-intuitive fact stated flatly",
-    "an impossible-sounding comparison or number", "a bold claim that sounds wrong but is true",
+    "mid-disaster freeze-frame: open on the thing about to fail, in present tense ('This wing is about to snap!')",
+    "impossible contradiction: state something that sounds backwards but is true, then 'Why?' in scene 2",
+    "countdown tension: one number + one object + one second before it breaks",
+    "forbidden-knowledge flat claim: 'Engineers hide this on purpose.'-style, but TRUE and specific to the topic",
+    "shock comparison: one tiny thing versus one gigantic thing, stated with exact contrast",
 ]
+HOOK_BAD_OPEN = re.compile(r"^\s*(today|in\s+(the\s+)?(19|18|20)\d\d|have you|did you know|imagine|let me|welcome|this is the story|once upon|long ago|back in|"
+                           r"the story of|here is|here's|so,|hi\b|hello|you won't|ever wonder)", re.I)
 FORMATS = [
     "Title like 'Why Perfect X Don't Work'", "Title like 'The Hidden Law Behind X'", "Title like 'X Should Have Worked. It Didn't.'",
     "Title like 'What Really Happened To X'", "Title like 'The Engineer Who Was Right'", "Title like 'The Tiny Detail That Broke X'",
 ]
-ANIMS = ["zoom_in", "zoom_out", "slow_zoom_out", "push_in", "pan_left", "pan_right", "shake", "drift"]
+ANIMS = ["zoom_in", "zoom_out", "slow_zoom_out", "push_in", "pan_left", "pan_right", "shake", "drift", "crash_zoom", "whip_pan"]
 TRANS = ["cut", "flash", "fade", "glitch"]
 SECTIONS = ["HOOK", "BODY", "TWIST"]
 SFX = ["none", "whoosh", "thud", "rise", "gasp", "knock", "sparkle", "alarm", "buzz", "scratch", "gulp"]
@@ -124,7 +131,7 @@ STYLES = ["tee", "polo", "stripe", "hoodie"]
 SHOTS = ["wide", "medium", "close"]
 POS = ["left", "center", "right"]
 # ---- flat-vector props (props.py) - naya prop jodo to yahan naam likho (purane chicken/barrel/eggs/moneybag props.py mein hain, bas ab prompt mein nahi)
-PROP_TYPES = ["gear", "train", "rails", "bridge", "tower", "chalkboard", "sign", "graph", "hand", "house", "tree", "coins"]
+PROP_TYPES = ["gear", "train", "rails", "bridge", "tower", "chalkboard", "sign", "graph", "hand", "house", "tree", "coins", "airplane", "wing", "cloud"]
 PROP_ACTIONS = ["idle", "walk", "run", "peck", "flap", "pop", "fall", "rise", "spin", "shake", "occupied", "hold", "drop"]
 PLACES = ["left", "center", "right", "front", "back"]
 WORDS_MIN, WORDS_MAX = 140, 160           # script ke total words (strict)
@@ -143,15 +150,24 @@ not sure of an exact number say 'about' or leave it out. Never invent statistics
 LENGTH (strict): 20-24 scenes, 6-8 spoken words per scene, 140-160 words TOTAL (about 60 seconds). Count the words before answering.
 Word budget: HOOK ~16 words, CONFLICT ~34, RISING ACTION ~52, CLIMAX & TWIST ~48.
 STRUCTURE (use these exact section labels in the JSON: HOOK, BODY, TWIST):
-HOOK (section HOOK, scenes 1-2, first ~5 seconds): open with a mind-breaking puzzle, a high-stakes moment or a counter-intuitive
-engineering fact. It must create a question the viewer needs answered. No greeting, no 'today we will learn'.
+HOOK (section HOOK, scenes 1-2, first ~5 seconds) = THE MOST IMPORTANT PART. The viewer decides in 3 seconds. Rules:
+ - Scene 1 is MAX 8 words and drops the viewer INTO the tense moment, present tense, like a freeze-frame seconds before something breaks, or a
+   claim that sounds impossible. Names the exact object of the topic (the wing, the dome, the bridge). Example shapes: 'This wing is about to snap!' /
+   'Every engineer here is wrong.' / 'One bolt is holding up this tower.'
+ - Scene 2 (6-8 words) RAISES the stakes or the contradiction and ends on an open question ('But the engineers are smiling. Why?'). It must NOT answer it.
+ - FORBIDDEN openings: dates ('In 1940...'), 'Today', 'Have you ever', 'Did you know', 'Imagine', 'Once upon a time', 'This is the story of', any greeting or introduction of people.
+ - Visual tension in scene 1: the topic object as a prop (shaking / falling / rising), a scared or shocked character, shot wide or close, sfx rise, thud or alarm.
 CONFLICT (section BODY, the next 4-5 scenes): introduce the protagonist (engineer / worker / inventor) who faces a choice that goes AGAINST
 conventional wisdom (the boss, the crowd or the rival says one thing, the protagonist or rival believes another). Make the stakes concrete
 (a bridge, a train, a city, a deadline, a budget).
 RISING ACTION (section BODY, the next 7-9 scenes): the initial assumptions or the rival approach seem to WORK. Success builds, confidence
 grows, tiny warning signs appear. One clear visual action per scene; use concrete numbers and objects ('two bridges', 'ten trains', 'one bolt').
-CLIMAX & TWIST (section TWIST, the last 5-6 scenes): the surprise lands, then reveal the hidden physical / scientific / historical law in one
-plain sentence, show how it flips the outcome, and end with ONE memorable closing line that echoes the hook so the video loops.
+CLIMAX & TWIST (section TWIST, the last 6-7 scenes): build a DRAMATIC peak, not a quiet explanation.
+ - TWIST scene 1: the surprise lands. shot wide, anim shake or crash_zoom, sfx alarm or thud, transition flash, a prop doing its most extreme action (fall / shake / rise).
+ - TWIST scene 2: reaction close-up (shot close, one character, shock / scream / think, emo surprised or scared), anim crash_zoom or zoom_in, sfx gasp or rise.
+ - Middle TWIST scenes: reveal the hidden physical / scientific / historical law in ONE plain sentence (chalkboard prop with the law), anim push_in or whip_pan, sfx rise or thud.
+ - Second to last: the consequence hits (anim shake, sfx thud). LAST scene: ONE memorable closing line that echoes the hook so the video loops, anim slow_zoom_out, sfx sparkle.
+ - Use ONLY sfx and anim values from the allowed lists; never leave sfx 'none' in the first 4 TWIST scenes.
 
 CHARACTERS (code draws them, so design them with the given options only): create 2-4 characters (id, name, role) that look clearly
 different from each other: big round beige head, tiny dot eyes, potato-shaped body, thin legs (different shirt colour + hat + hair).
@@ -171,10 +187,16 @@ type = gear (action spin | shake(jammed) | idle; text = tiny label) | train (act
 collapses) | tower (a tall building; action idle | shake; text 'lean' = tilted) | chalkboard (text = what is written, e.g. '2 trains|1 track';
 '|' = new line; icons (up) (down) (coin)) | sign (text = short warning like 'DANGER!', max 14 chars) | graph (text 'up' or 'down' + optional label
 like '+300%') | hand (a BIG hand dropping or holding an item from above, text = gear | coin | bag; action hold or drop; use for 2-3 dramatic
-close-ups) | house | tree | coins (text = count). place = left | center | right | front | back. Props must illustrate what the narration says
+close-ups) | house | tree | coins (text = count). place = left | center | right | front | back. airplane (passenger plane side view; action idle | walk | run = flying bob | shake = turbulence; text 'tilt' = banking) | wing (a plane wing;
+action idle | shake = gust | rise = bends upward | fall = snaps; text 'rigid' = stiff wing with a stress spark at the root, 'flex' = bends up, 'snap' = breaks) |
+cloud (sky cloud, place back). Props must illustrate what the narration says
 (narration says 'the bridge began to sway' -> bridge with action shake; 'the track bent' -> rails text 'bend'; 'a tiny gear' -> hand holding gear).
 Vary shots: mostly medium and wide, 3-5 CLOSE-UP reaction shots (one character, big emotion) right after a surprising event. Let characters REACT.
 Use walk/run only when someone really moves. Show the same characters repeatedly so the viewer follows their story.
+TOPIC LOCK (strict): every prop, location and diorama object must belong to the story's core subject. An aerospace story uses airplane / wing /
+cloud / gear + neutral props (chalkboard, sign, graph, hand, coins) and locations like a hangar, a wing test lab, a runway or a drafting office: NEVER trains,
+rails, bridges or ships. A railway story never gets airplanes, a bridge story never gets trains. If no listed prop fits the subject, use chalkboard / sign / graph instead of
+an unrelated object. Location prompts must not mention any object from another field.
 WORLD: one sentence naming the art direction of the environment (palette, materials, era, mood) used for every location.
 TITLE: 35-70 characters, curiosity-driven (e.g. 'Why Perfect Railroads Don't Work'). DESCRIPTION: one hook sentence + 3-5 hashtags (#engineering #science #history ...).
 TAGS: 6-10 short tags. TOPIC: one short, specific premise used for repeat avoidance. music_mood: mysterious or epic (or quirky/chill if it truly fits).
@@ -268,6 +290,54 @@ def _pick(v, allowed, default):
     return v if v in allowed else default
 
 
+TENSE_EMO = {"scared", "surprised", "worried", "angry"}
+DRAMA_ANIM = {"shake", "crash_zoom", "zoom_in", "push_in", "whip_pan"}
+
+
+def hook_pass(sc):
+    """HOOK: pehla scene seedha tension se shuru (tense sfx, ghabraya character, topic prop dikhe), scene 2 par bhi sound cue."""
+    s0 = sc[0]
+    if s0["sfx"] not in ("rise", "thud", "alarm", "whoosh"):
+        s0["sfx"] = "rise"
+    if s0["shot"] == "medium":
+        s0["shot"] = "wide"
+    for a in s0["cast"]:
+        if a["emo"] not in TENSE_EMO:
+            a["emo"] = "surprised"
+        if a["action"] in ("idle", "talk", "smile", "listen", "hold", "wave", "walk"):
+            a["action"] = "shock"
+    if len(sc) > 1 and sc[1]["sfx"] == "none":
+        sc[1]["sfx"] = "gulp"
+
+
+def climax_pass(sc):
+    """TWIST: dramatic camera (shot/anim) + high-retention sfx. Model ka dramatic choice rakhta hai, kamzor/khaali jagah bharta hai."""
+    idx = [k for k, s in enumerate(sc) if s["section"] == "TWIST"]
+    n = len(idx)
+    for j, k in enumerate(idx):
+        s = sc[k]
+        if j == 0:                                           # surprise lands
+            s["shot"], s["sfx"] = "wide", (s["sfx"] if s["sfx"] in ("alarm", "thud", "buzz") else "alarm")
+            s["anim"] = s["anim"] if s["anim"] in ("shake", "crash_zoom") else "shake"
+        elif j == 1:                                         # reaction close-up
+            s["shot"] = "close" if len(s["cast"]) == 1 else s["shot"]
+            s["anim"] = s["anim"] if s["anim"] in ("crash_zoom", "zoom_in") else "crash_zoom"
+            s["sfx"] = s["sfx"] if s["sfx"] in ("gasp", "rise", "scratch") else "gasp"
+            if len(s["cast"]) == 1:
+                a = s["cast"][0]
+                a["action"] = a["action"] if a["action"] in REACT_ACTIONS else "shock"
+                a["emo"] = a["emo"] if a["emo"] in TENSE_EMO else "surprised"
+        elif j == n - 1:                                     # closing line
+            s["anim"], s["sfx"] = "slow_zoom_out", ("sparkle" if s["sfx"] in ("none", "alarm", "buzz") else s["sfx"])
+        elif j == n - 2:                                     # consequence hits
+            s["anim"] = s["anim"] if s["anim"] in ("shake", "crash_zoom") else "shake"
+            s["sfx"] = s["sfx"] if s["sfx"] in ("thud", "alarm", "knock") else "thud"
+        else:                                                # law reveal / build
+            s["anim"] = s["anim"] if s["anim"] in DRAMA_ANIM else "push_in"
+            if s["sfx"] == "none":
+                s["sfx"] = "rise" if j % 2 else "thud"
+
+
 def finalize(d):
     """Model ki galtiyan theek karta hai: characters/locations/cast ke ids, enums, positions, section ki tarteeb, fixed camera cues."""
     chars = []
@@ -291,6 +361,8 @@ def finalize(d):
     d["locations"] = locs[:8]
     ids, lids = [c["id"] for c in chars], [l["id"] for l in d["locations"]]
     sc = d["scenes"]
+    theme = propkit.detect_theme(" ".join([d.get("topic", ""), d.get("title", "")] + [s.get("text", "") for s in sc] + [l["prompt"] for l in d["locations"]]))
+    d["prop_theme"] = theme or "generic"
     order = [SECTIONS.index(s["section"]) if s.get("section") in SECTIONS else -1 for s in sc]
     ok = (min(order) >= 0 and order == sorted(order) and order.count(0) >= 1 and order.count(2) >= 2)
     if not ok:                                              # model ki tarteeb galat -> position se: pehle 2 HOOK, aakhri 5 TWIST
@@ -322,7 +394,7 @@ def finalize(d):
         s["cast"] = cast
         sp = _id(s.get("speaker"))
         s["speaker"] = sp if sp in used else ""
-        s["props"] = clean_props(s.get("props"), ids)
+        s["props"] = clean_props(s.get("props"), ids, theme)
         toks = {_tok(w) for w in s["text"].split()}
         em = [w for w in re.findall(r"[A-Za-z0-9']+", s.get("emph") or "") if _tok(w) in toks][:2]
         s["emph"] = "" if s["section"] == "HOOK" else " ".join(em)
@@ -336,9 +408,11 @@ def finalize(d):
             s["shot"], last_close = "close", k
         elif s["shot"] == "close":
             last_close = k
+    hook_pass(sc)
     sc[0]["anim"], sc[0]["transition"] = "zoom_in", "flash"
     first_twist = next(k for k, s in enumerate(sc) if s["section"] == "TWIST")
     sc[first_twist]["transition"] = "flash"
+    climax_pass(sc)
     sc[-1]["anim"] = "slow_zoom_out"
     d["world"] = re.sub(r"\s+", " ", d.get("world") or "").strip() or "stylized 3D cartoon diorama of a real engineering site, warm daylight, saturated colours, soft shadows"
     d["music_mood"] = _pick(d.get("music_mood"), MOODS, "mysterious")
@@ -356,6 +430,13 @@ def clean(d):
         raise ValueError(f"script has {words} words: TOO SHORT, add at least {WORDS_MIN - words} words (need {WORDS_MIN}-{WORDS_MAX} words, {len(d['scenes'])} scenes now)")
     if not (SCENES_MIN <= len(d["scenes"]) <= SCENES_MAX):
         raise ValueError(f"bad size: {len(d['scenes'])} scenes (need {SCENES_MIN}-{SCENES_MAX} scenes, 6-8 words each)")
+    first = d["scenes"][0]["text"]
+    if HOOK_BAD_OPEN.search(first) or len(first.split()) > 9:
+        raise ValueError(f"weak HOOK '{first}': scene 1 must be max 8 words, present tense, drop straight into tension (no dates, no 'today', no 'have you ever', no intro)")
+    th = propkit.detect_theme(" ".join([d.get("topic", ""), d.get("title", "")] + [s["text"] for s in d["scenes"]]))
+    bad = propkit.theme_violations(th, [l.get("prompt", "") for l in d.get("locations") or []])   # props ko finalize() chup-chaap filter karta hai
+    if bad:
+        raise ValueError(f"OFF-TOPIC elements for a '{th}' story: {bad}. Locations and props must match the core subject only; remove them")
     if not (2 <= len(d.get("characters") or []) <= 6) or not (3 <= len(d.get("locations") or []) <= 10):
         raise ValueError("need 2-4 characters and 4-6 locations")
     t = re.sub(r"\s*#\w+", "", d["title"]).strip()           # title mein hashtag main.py lagata hai
@@ -371,7 +452,7 @@ def clean(d):
     return finalize(d)
 
 
-def clean_props(raw, ids):
+def clean_props(raw, ids, theme=None):
     """Gemini ke props ko saaf karta hai: valid type/place/action, max 3, hand max 1, text chhota."""
     out = []
     for p in raw or []:
@@ -389,7 +470,7 @@ def clean_props(raw, ids):
             act = act if act in ("hold", "drop") else "hold"
             txt = txt.lower() if txt.lower() in ("gear", "coin", "bag") else "gear"
         out.append(dict(type=t, place=_pick(str(p.get("place", "right")).lower(), PLACES, "right"), action=act, text=txt))
-    return out
+    return propkit.filter_props(out, theme)                 # topic lock: off-topic props (train in an aerospace video) hata do
 
 
 def _P(t, place="right", action="idle", text=""):
@@ -445,7 +526,7 @@ FALLBACK = {
     ],
 }
 
-ANIM_TXT = {"zoom_in": "Quick zoom-in", "zoom_out": "Zoom-out", "slow_zoom_out": "Slow zoom-out + vignette", "push_in": "Slow push-in",
+ANIM_TXT = {"crash_zoom": "Crash zoom (climax)", "whip_pan": "Whip pan (climax)", "zoom_in": "Quick zoom-in", "zoom_out": "Zoom-out", "slow_zoom_out": "Slow zoom-out + vignette", "push_in": "Slow push-in",
             "pan_left": "Pan left", "pan_right": "Pan right", "shake": "Camera shake", "drift": "Floating drift"}
 TRANS_TXT = {"cut": "hard cut", "flash": "flash transition", "fade": "fade from black", "glitch": "glitch transition"}
 
@@ -477,9 +558,10 @@ def pick_ingredients(used_seeds):
     """Har call par bilkul naya random combo: category + starting idea (aaj tak use na hua) + twist + protagonist + hook + title-format.
     20% runs 'wildcard' hote hain: koi seed nahi, Gemini us category ka koi kam-jaana asli case khud chunta hai (isse topics predictable nahi rehte)."""
     rnd = random.SystemRandom()
-    cat = rnd.choice(list(SEEDS))
-    pool = [x for x in SEEDS[cat] if x not in used_seeds] or SEEDS[cat]
-    wild = rnd.random() < 0.20
+    forced = os.environ.get("FORCE_SEED", "").strip()          # e.g. FORCE_SEED="why airplane wings flex up and survive turbulence"
+    cat = next((c for c, v in SEEDS.items() if forced and forced in v), None) or rnd.choice(list(SEEDS))
+    pool = [forced] if forced else ([x for x in SEEDS[cat] if x not in used_seeds] or SEEDS[cat])
+    wild = (not forced) and rnd.random() < 0.20
     if wild:
         idea = (f"Starting idea: NONE. Pick a real, lesser-known, well-documented case from this area yourself: {cat}. "
                 "Avoid the famous textbook examples (Tacoma Narrows, Titanic, Eiffel Tower, Leaning Tower of Pisa).")
@@ -489,6 +571,10 @@ def pick_ingredients(used_seeds):
         idea = (f"Starting idea (you may sharpen it or swap it for a different, lesser-known real case of the same kind): {seed}.")
     spec = (f"TODAY'S RANDOM INGREDIENTS. Area: {cat}. {idea} Climax type: {rnd.choice(TWISTS)}. Protagonist: {rnd.choice(PROTAGONISTS)}. "
             f"Hook style: {rnd.choice(HOOKS)}. {rnd.choice(FORMATS)}.")
+    th = propkit.detect_theme(seed if not wild else "")
+    if th:                                                  # seed ki theme pehle se maloom => prompt mein lock
+        spec += (f" THEME LOCK: this is a '{th}' story. Allowed topical props: {', '.join(propkit.THEMES[th]['props'])} (+ chalkboard, sign, graph, hand, coins). "
+                 f"Forbidden in locations and props: {', '.join(propkit.THEMES[th]['ban'])}.")
     return cat, seed, spec
 
 
