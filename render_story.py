@@ -331,9 +331,10 @@ def layout_scene(sc, prev_ids, chars, hold):
 
 
 # ---------------------------------------------------------------- props layout (props.py ke items scene mein rakhna)
-PROP_K = dict(chicken=1.35, barrel=1.0, chalkboard=1.0, coins=1.15, eggs=1.25, house=1.25, tree=1.2, sign=1.0, moneybag=1.3, graph=1.0, hand=0.0)
+PROP_K = dict(chicken=1.35, barrel=1.0, chalkboard=1.0, coins=1.15, eggs=1.25, house=1.25, tree=1.2, sign=1.0, moneybag=1.3, graph=1.0, hand=0.0,
+              gear=0.85, train=1.15, rails=1.3, bridge=1.7, tower=1.5)
 PLANE_ROW = {"front": 0.12, "back": -0.07}       # char ki zameen se farq (frame height ka fraction)
-BACK_TYPES = {"house", "tree"}                    # inhe default mein peeche rakhte hain (chhota + door)
+BACK_TYPES = {"house", "tree", "tower", "bridge"}                    # inhe default mein peeche rakhte hain (chhota + door)
 MOVE_SPEED = {"walk": 1.0, "run": 2.2}
 
 
