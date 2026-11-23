@@ -1,0 +1,802 @@
+{
+  "topic": "why airplane wings flex up and survive turbulence",
+  "title": "Why Airplane Wings Must Bend Or Break",
+  "description": "This wing bends like rubber on purpose. The hidden law behind it keeps every flight alive.\n\n#engineering #science #aviation #physics #shorts",
+  "tags": [
+    "engineering",
+    "science",
+    "airplane",
+    "aviation",
+    "wing",
+    "physics",
+    "turbulence",
+    "mystery"
+  ],
+  "music_mood": "mysterious",
+  "world": "stylized 3D cartoon diorama of an aircraft test facility, bright daylight, brushed aluminium, sky blue and safety orange accents",
+  "characters": [
+    {
+      "id": "chief",
+      "name": "Chief Engineer",
+      "role": "chief aircraft engineer",
+      "shirt": "white",
+      "pants": "navy",
+      "hair_color": "gray",
+      "hat": "none",
+      "hat_color": "red",
+      "style": "polo",
+      "glasses": true,
+      "mustache": false,
+      "tie": true,
+      "overalls": false,
+      "monocle": false
+    },
+    {
+      "id": "tech",
+      "name": "Test Foreman",
+      "role": "wing test foreman",
+      "shirt": "orange",
+      "pants": "brown",
+      "hair_color": "black",
+      "hat": "hardhat",
+      "hat_color": "yellow",
+      "style": "tee",
+      "glasses": false,
+      "mustache": true,
+      "tie": false,
+      "overalls": false,
+      "monocle": false
+    },
+    {
+      "id": "kid",
+      "name": "Apprentice",
+      "role": "young apprentice",
+      "shirt": "blue",
+      "pants": "navy",
+      "hair_color": "red",
+      "hat": "cap",
+      "hat_color": "gray",
+      "style": "tee",
+      "glasses": false,
+      "mustache": false,
+      "tie": false,
+      "overalls": true,
+      "monocle": false
+    }
+  ],
+  "locations": [
+    {
+      "id": "lab",
+      "prompt": "empty aircraft wing test laboratory with giant steel frames, hydraulic jacks and thick cables, bright overhead lights, stylized 3D cartoon diorama, warm daylight, large flat open concrete floor filling the lower half, vertical 9:16, no people"
+    },
+    {
+      "id": "hangar",
+      "prompt": "empty airplane hangar interior with a huge open door showing blue sky, tool racks and engine stands along the walls, stylized 3D cartoon diorama, warm daylight, large flat open concrete floor in lower half, vertical 9:16, no people"
+    },
+    {
+      "id": "runway",
+      "prompt": "empty airport apron beside a long runway under big clouds, orange windsock and low hills in the distance, stylized 3D cartoon diorama, warm daylight, large flat open tarmac in lower half, vertical 9:16, no people"
+    },
+    {
+      "id": "office",
+      "prompt": "empty aircraft design office with wing blueprints pinned to walls, drafting tables, desk lamps and a small wooden airplane model, stylized 3D cartoon diorama, warm light, large flat open wooden floor in lower half, vertical 9:16, no people"
+    }
+  ],
+  "scenes": [
+    {
+      "text": "This airplane wing is about to snap!",
+      "section": "HOOK",
+      "loc": "lab",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "shock",
+          "emo": "scared",
+          "pos": "center",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "zoom_in",
+      "transition": "flash",
+      "sfx": "rise",
+      "emph": "",
+      "props": [
+        {
+          "type": "wing",
+          "place": "back",
+          "action": "rise",
+          "text": "flex"
+        }
+      ]
+    },
+    {
+      "text": "But the engineers are smiling. Why?",
+      "section": "HOOK",
+      "loc": "lab",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "smile",
+          "emo": "smug",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "kid",
+          "action": "think",
+          "emo": "confused",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "push_in",
+      "transition": "cut",
+      "sfx": "gulp",
+      "emph": "",
+      "props": [
+        {
+          "type": "wing",
+          "place": "back",
+          "action": "rise",
+          "text": "flex"
+        }
+      ]
+    },
+    {
+      "text": "A jetliner hangs from just two wings.",
+      "section": "BODY",
+      "loc": "runway",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "kid",
+          "action": "point",
+          "emo": "surprised",
+          "pos": "left",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "pan_right",
+      "transition": "cut",
+      "sfx": "none",
+      "emph": "",
+      "props": [
+        {
+          "type": "airplane",
+          "place": "center",
+          "action": "run",
+          "text": ""
+        },
+        {
+          "type": "cloud",
+          "place": "back",
+          "action": "idle",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "Early designers believed stronger meant stiffer.",
+      "section": "BODY",
+      "loc": "office",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "talk",
+          "emo": "proud",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "kid",
+          "action": "listen",
+          "emo": "neutral",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "chief",
+      "anim": "pan_left",
+      "transition": "cut",
+      "sfx": "none",
+      "emph": "stiffer",
+      "props": [
+        {
+          "type": "chalkboard",
+          "place": "right",
+          "action": "idle",
+          "text": "STRONG|= STIFF"
+        }
+      ]
+    },
+    {
+      "text": "So they built wings rigid as steel beams.",
+      "section": "BODY",
+      "loc": "hangar",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "hold",
+          "emo": "proud",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "push_in",
+      "transition": "cut",
+      "sfx": "none",
+      "emph": "rigid",
+      "props": [
+        {
+          "type": "wing",
+          "place": "right",
+          "action": "idle",
+          "text": "rigid"
+        }
+      ]
+    },
+    {
+      "text": "One apprentice asked an uncomfortable question.",
+      "section": "BODY",
+      "loc": "office",
+      "shot": "close",
+      "cast": [
+        {
+          "id": "kid",
+          "action": "think",
+          "emo": "worried",
+          "pos": "center",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "zoom_in",
+      "transition": "cut",
+      "sfx": "gulp",
+      "emph": "question",
+      "props": [
+        {
+          "type": "sign",
+          "place": "right",
+          "action": "shake",
+          "text": "WHAT IF?"
+        }
+      ]
+    },
+    {
+      "text": "What happens when turbulence hits a rigid wing?",
+      "section": "BODY",
+      "loc": "runway",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "kid",
+          "action": "point",
+          "emo": "worried",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "chief",
+          "action": "listen",
+          "emo": "neutral",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "drift",
+      "transition": "cut",
+      "sfx": "none",
+      "emph": "turbulence",
+      "props": [
+        {
+          "type": "airplane",
+          "place": "center",
+          "action": "shake",
+          "text": ""
+        },
+        {
+          "type": "cloud",
+          "place": "back",
+          "action": "idle",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "The chief engineer laughed and ordered a test.",
+      "section": "BODY",
+      "loc": "office",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "laugh",
+          "emo": "smug",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "pan_right",
+      "transition": "cut",
+      "sfx": "none",
+      "emph": "test",
+      "props": [
+        {
+          "type": "graph",
+          "place": "right",
+          "action": "idle",
+          "text": "up TEST"
+        }
+      ]
+    },
+    {
+      "text": "Hydraulic jacks pulled the stiff wing upward.",
+      "section": "BODY",
+      "loc": "lab",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "point",
+          "emo": "neutral",
+          "pos": "left",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "pan_left",
+      "transition": "cut",
+      "sfx": "none",
+      "emph": "",
+      "props": [
+        {
+          "type": "wing",
+          "place": "center",
+          "action": "idle",
+          "text": "rigid"
+        },
+        {
+          "type": "gear",
+          "place": "right",
+          "action": "spin",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "Ten tons. Twenty tons. Still no problem.",
+      "section": "BODY",
+      "loc": "lab",
+      "shot": "close",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "celebrate",
+          "emo": "excited",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "push_in",
+      "transition": "cut",
+      "sfx": "sparkle",
+      "emph": "Twenty",
+      "props": [
+        {
+          "type": "chalkboard",
+          "place": "right",
+          "action": "idle",
+          "text": "10 tons|20 tons"
+        }
+      ]
+    },
+    {
+      "text": "Everyone cheered. Rigid wings looked unbeatable.",
+      "section": "BODY",
+      "loc": "hangar",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "celebrate",
+          "emo": "proud",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "tech",
+          "action": "celebrate",
+          "emo": "happy",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "zoom_out",
+      "transition": "cut",
+      "sfx": "sparkle",
+      "emph": "unbeatable",
+      "props": [
+        {
+          "type": "airplane",
+          "place": "back",
+          "action": "walk",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "Then they simulated a violent gust.",
+      "section": "BODY",
+      "loc": "lab",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "kid",
+          "action": "shock",
+          "emo": "scared",
+          "pos": "left",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "shake",
+      "transition": "cut",
+      "sfx": "whoosh",
+      "emph": "violent",
+      "props": [
+        {
+          "type": "wing",
+          "place": "center",
+          "action": "shake",
+          "text": "rigid"
+        },
+        {
+          "type": "cloud",
+          "place": "back",
+          "action": "idle",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "The rigid wing took the whole punch.",
+      "section": "BODY",
+      "loc": "lab",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "scream",
+          "emo": "scared",
+          "pos": "center",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "shake",
+      "transition": "cut",
+      "sfx": "thud",
+      "emph": "punch",
+      "props": [
+        {
+          "type": "wing",
+          "place": "back",
+          "action": "shake",
+          "text": "rigid crack"
+        }
+      ]
+    },
+    {
+      "text": "Stress piled up at one single joint.",
+      "section": "BODY",
+      "loc": "lab",
+      "shot": "close",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "facepalm",
+          "emo": "worried",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "zoom_in",
+      "transition": "cut",
+      "sfx": "buzz",
+      "emph": "single joint",
+      "props": [
+        {
+          "type": "sign",
+          "place": "right",
+          "action": "shake",
+          "text": "STRESS!"
+        }
+      ]
+    },
+    {
+      "text": "Next they tested a wing built to flex.",
+      "section": "BODY",
+      "loc": "hangar",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "kid",
+          "action": "point",
+          "emo": "excited",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "chief",
+          "action": "think",
+          "emo": "confused",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "pan_right",
+      "transition": "cut",
+      "sfx": "rise",
+      "emph": "flex",
+      "props": [
+        {
+          "type": "wing",
+          "place": "center",
+          "action": "idle",
+          "text": "flex"
+        }
+      ]
+    },
+    {
+      "text": "The jacks pulled. The wing curved upward!",
+      "section": "TWIST",
+      "loc": "lab",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "shock",
+          "emo": "surprised",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "shake",
+      "transition": "flash",
+      "sfx": "alarm",
+      "emph": "upward",
+      "props": [
+        {
+          "type": "wing",
+          "place": "center",
+          "action": "rise",
+          "text": "flex"
+        },
+        {
+          "type": "gear",
+          "place": "right",
+          "action": "spin",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "Metres of bend, and not one crack.",
+      "section": "TWIST",
+      "loc": "lab",
+      "shot": "close",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "shock",
+          "emo": "surprised",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "zoom_in",
+      "transition": "cut",
+      "sfx": "gasp",
+      "emph": "not one",
+      "props": [
+        {
+          "type": "wing",
+          "place": "back",
+          "action": "rise",
+          "text": "flex"
+        }
+      ]
+    },
+    {
+      "text": "Flexing spreads the force along the whole wing.",
+      "section": "TWIST",
+      "loc": "office",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "point",
+          "emo": "proud",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "kid",
+          "action": "listen",
+          "emo": "excited",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "push_in",
+      "transition": "cut",
+      "sfx": "rise",
+      "emph": "spreads",
+      "props": [
+        {
+          "type": "chalkboard",
+          "place": "right",
+          "action": "idle",
+          "text": "FLEX =|SPREAD FORCE"
+        }
+      ]
+    },
+    {
+      "text": "Gusts get absorbed like a shock absorber.",
+      "section": "TWIST",
+      "loc": "runway",
+      "shot": "close",
+      "cast": [
+        {
+          "id": "kid",
+          "action": "celebrate",
+          "emo": "excited",
+          "pos": "center",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "whip_pan",
+      "transition": "cut",
+      "sfx": "whoosh",
+      "emph": "absorbed",
+      "props": [
+        {
+          "type": "airplane",
+          "place": "back",
+          "action": "shake",
+          "text": ""
+        },
+        {
+          "type": "cloud",
+          "place": "back",
+          "action": "idle",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "A wing that cannot bend will break.",
+      "section": "TWIST",
+      "loc": "hangar",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "tech",
+          "action": "shock",
+          "emo": "scared",
+          "pos": "left",
+          "facing": "right"
+        }
+      ],
+      "speaker": "",
+      "anim": "shake",
+      "transition": "cut",
+      "sfx": "thud",
+      "emph": "break",
+      "props": [
+        {
+          "type": "wing",
+          "place": "right",
+          "action": "fall",
+          "text": "snap"
+        }
+      ]
+    },
+    {
+      "text": "So every jet wing is built to bend.",
+      "section": "TWIST",
+      "loc": "lab",
+      "shot": "medium",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "smile",
+          "emo": "proud",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "kid",
+          "action": "smile",
+          "emo": "happy",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "shake",
+      "transition": "cut",
+      "sfx": "thud",
+      "emph": "bend",
+      "props": [
+        {
+          "type": "airplane",
+          "place": "back",
+          "action": "run",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "text": "That bend is how every wing survives.",
+      "section": "TWIST",
+      "loc": "runway",
+      "shot": "wide",
+      "cast": [
+        {
+          "id": "chief",
+          "action": "smile",
+          "emo": "proud",
+          "pos": "left",
+          "facing": "right"
+        },
+        {
+          "id": "tech",
+          "action": "smile",
+          "emo": "happy",
+          "pos": "right",
+          "facing": "left"
+        }
+      ],
+      "speaker": "",
+      "anim": "slow_zoom_out",
+      "transition": "cut",
+      "sfx": "sparkle",
+      "emph": "survives",
+      "props": [
+        {
+          "type": "airplane",
+          "place": "center",
+          "action": "run",
+          "text": ""
+        },
+        {
+          "type": "cloud",
+          "place": "back",
+          "action": "idle",
+          "text": ""
+        }
+      ]
+    }
+  ],
+  "prop_theme": "aerospace"
+}
