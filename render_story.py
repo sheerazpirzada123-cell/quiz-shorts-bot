@@ -242,6 +242,11 @@ def camera(kind, lt, hold, seed):
         z, orb, px = 1.10, 70 * (1 - 2 * p), 14 * (1 - 2 * p)
     elif kind == "pan_right":
         z, orb, px = 1.10, -70 * (1 - 2 * p), -14 * (1 - 2 * p)
+    elif kind == "crash_zoom":                                              # climax: tez zoom + jhatka
+        z, dol = 1.07 + 0.30 * (1 - (1 - p) ** 3), 0.16 * p
+        px, py = 10 * math.exp(-lt * 5) * math.sin(lt * 61 + seed), 10 * math.exp(-lt * 5) * math.cos(lt * 57)
+    elif kind == "whip_pan":                                                # climax: tez side-whip
+        z, orb, px = 1.14, 110 * (1 - 2 * ease(min(1.0, p * 2.5))), 30 * (1 - 2 * ease(min(1.0, p * 2.5)))
     elif kind == "shake":
         amp = 8 + 14 * math.exp(-lt * 4)
         z, dol, px, py = 1.10 + 0.04 * p, 0.05, amp * math.sin(lt * 47 + seed), amp * math.cos(lt * 53 + 2 * seed)
@@ -332,9 +337,9 @@ def layout_scene(sc, prev_ids, chars, hold):
 
 # ---------------------------------------------------------------- props layout (props.py ke items scene mein rakhna)
 PROP_K = dict(chicken=1.35, barrel=1.0, chalkboard=1.0, coins=1.15, eggs=1.25, house=1.25, tree=1.2, sign=1.0, moneybag=1.3, graph=1.0, hand=0.0,
-              gear=0.85, train=1.15, rails=1.3, bridge=1.7, tower=1.5)
+              gear=0.85, train=1.15, rails=1.3, bridge=1.7, tower=1.5, wing=0.8, airplane=0.8, cloud=1.3)
 PLANE_ROW = {"front": 0.12, "back": -0.07}       # char ki zameen se farq (frame height ka fraction)
-BACK_TYPES = {"house", "tree", "tower", "bridge"}                    # inhe default mein peeche rakhte hain (chhota + door)
+BACK_TYPES = {"house", "tree", "tower", "bridge", "cloud"}                    # inhe default mein peeche rakhte hain (chhota + door)
 MOVE_SPEED = {"walk": 1.0, "run": 2.2}
 
 
@@ -352,6 +357,8 @@ def layout_props(sc, actors, Hc):
     occupied_ids = set()
     for j, p in enumerate(sc.get("props") or []):
         t, place_, act, txt = p["type"], p.get("place", "right"), p.get("action", "idle"), p.get("text", "")
+        if t not in props.PROPS:
+            continue
         seed = zlib.crc32((t + txt + str(j)).encode()) % 1000
         if t == "hand":
             x = {"left": 0.30, "center": 0.5, "right": 0.70}.get(place_, 0.5) * W
@@ -615,7 +622,7 @@ class Renderer:
         elif trans == "cut" and lt < 0.18:
             cam["z"] *= 1 + 0.04 * (1 - lt / 0.18) ** 2
         if sc.get("sfx") in IMPACT and 0.10 <= lt < 0.55:                    # impact par halka camera jhatka
-            a = 14 * math.exp(-(lt - 0.10) * 8)
+            a = (22 if sc.get("section") == "TWIST" else 14) * math.exp(-(lt - 0.10) * 8)   # climax par bada jhatka
             cam["pan"] = (cam["pan"][0] + a * math.sin(lt * 95), cam["pan"][1] + a * math.cos(lt * 83))
         wp, _ = self.bg(i)
         frame = wp.render(cam["z"], cam["dolly"], cam["pan"], cam["orbit"])      # 2.5D parallax
