@@ -595,3 +595,123 @@ def tower(c):
         for cx in (-0.14, 0.0, 0.14):
             c.rrect(cx - 0.035 + s, y, cx + 0.035 + s, y + 0.08, 0.008, (236, 226, 150) if (r + int(cx * 10) + c.seed) % 3 else (96, 132, 170), ow=False)
     c.line([(sw, 1.30), (sw, 1.42)], 0.015, (80, 80, 90), ow=True)
+
+
+# ============================================================ AEROSPACE PROPS (v8): airplane, wing, cloud
+@prop("wing", ext=(1.0, 1.0, 1.25, 0.03))
+def wing(c):
+    """Plane ka wing (side-on). text 'rigid' = akda hua (bend nahi, root par stress), 'flex' / action rise = upar ki taraf khoob bend,
+    action shake = jhatke (gust), action fall ya text 'snap' = toot kar tip gir jaata hai."""
+    t = (c.txt or "").lower()
+    d = c.d
+    rigid = "rigid" in t or "stiff" in t
+    snap = c.action == "fall" or "snap" in t
+    p = min(1.0, c.t / 1.2)
+    if rigid:
+        bend = 0.02
+    elif c.action == "rise" or "flex" in t:
+        bend = 0.46 * ease(p)
+    else:
+        bend = 0.05
+    if c.action == "shake":
+        bend += 0.05 * math.sin(c.t * 18)
+    ft = max(0.0, c.t - 0.5)
+    s0 = 0.55 if snap else 1.0
+
+    def yc(s):
+        return 0.55 + bend * s ** 2
+
+    def seg(sa, sb, dx=0.0, dy=0.0):
+        n = 8
+        ss = [sa + (sb - sa) * k / n for k in range(n + 1)]
+        top = [(d * (-0.85 + 1.7 * s) + dx, yc(s) + (0.15 - 0.10 * s) / 2 + dy) for s in ss]
+        bot = [(d * (-0.85 + 1.7 * s) + dx, yc(s) - (0.15 - 0.10 * s) / 2 + dy) for s in reversed(ss)]
+        c.poly(top + bot, (205, 212, 224))
+
+    seg(0.0, s0)
+    if snap:
+        seg(s0, 1.0, d * 0.12 * ft, -(ft ** 2) * 1.1 if ft > 0 else 0.0)
+    x0, x1 = sorted((d * -1.0, d * -0.80))
+    c.rrect(x0, 0.30, x1, 0.82, 0.04, (232, 236, 244))                       # fuselage ka hissa (wing root)
+    c.ell(d * (-0.85 + 1.7 * 0.35), yc(0.35) - 0.16, 0.09, 0.06, (70, 74, 86))   # engine
+    if rigid and (c.action == "shake" or "crack" in t or snap):                # root par stress
+        c.star(d * -0.78, 0.55, 0.07 + 0.02 * math.sin(c.t * 12), (255, 120, 90))
+    if snap and ft > 0.15:
+        c.star(d * (-0.85 + 1.7 * s0), yc(s0), 0.10 * math.sin(min(1.0, ft) * 3))
+
+
+@prop("airplane", ext=(1.0, 1.0, 0.95, 0.03), speed=0.4)
+def airplane(c):
+    """Passenger plane (side view). walk/run = udta hua halka bob, shake = turbulence, text 'tilt' = jhuka hua."""
+    d = c.d
+    mv = c.action in ("walk", "run")
+    tilt = 0.10 if "tilt" in (c.txt or "").lower() else 0.0
+    sh = 0.03 * math.sin(c.t * 20) if c.action == "shake" else 0.0
+    by = 0.52 + (0.012 * math.sin(c.t * 6) if mv else 0.0) + sh
+
+    def Y(x, y):
+        return y + tilt * x * d
+
+    c.poly([(d * -0.80, Y(-0.80, by + 0.10)), (d * -0.98, Y(-0.98, by + 0.52)), (d * -0.78, Y(-0.78, by + 0.52)), (d * -0.45, Y(-0.45, by + 0.12))], (226, 90, 80))  # tail fin
+    c.ell(0.0, Y(0, by), 0.82, 0.15, (236, 240, 248), 0)                                # fuselage
+    c.ell(d * 0.70, Y(0.70, by - 0.01), 0.14, 0.11, (196, 204, 216))                    # nose
+    for k in range(7):
+        c.circ(d * (0.45 - k * 0.12), Y(0.45 - k * 0.12, by + 0.04), 0.022, (110, 160, 214), ow=False)
+    c.poly([(d * 0.10, Y(0.10, by - 0.04)), (d * -0.35, Y(-0.35, by - 0.04)), (d * -0.12, Y(-0.12, by - 0.30)), (d * 0.16, Y(0.16, by - 0.26))], (190, 198, 212))  # wing
+    c.ell(d * -0.05, Y(-0.05, by - 0.22), 0.08, 0.05, (70, 74, 86))                     # engine
+
+
+@prop("cloud", ext=(0.8, 0.8, 0.9, 0.05), speed=0.1)
+def cloud(c):
+    """Aasmaan ka baadal (halka drift)."""
+    dx = 0.04 * math.sin(c.t * 0.8)
+    for x, y, rx, ry in ((-0.30, 0.50, 0.30, 0.20), (0.0, 0.62, 0.34, 0.26), (0.30, 0.50, 0.30, 0.20), (0.0, 0.46, 0.55, 0.15)):
+        c.ell(x + dx, y, rx, ry, (246, 248, 252))
+
+
+# ============================================================ TOPIC LOCK (strict prop/location matching)
+# TOPICAL props sirf apni theme mein allowed hain; NEUTRAL (infographic) props har theme mein chalte hain.
+NEUTRAL_PROPS = {"chalkboard", "sign", "graph", "hand", "coins"}
+THEMES = {
+    "aerospace": dict(kw=["airplane", "aeroplane", "aircraft", "airliner", "plane", "wing", "jet", "flight", "fly", "flies", "flew", "aerospace", "rocket",
+                          "concorde", "comet", "whittle", "wright", "aerodrome", "turbulence", "cockpit", "runway", "pilot", "aviation", "orbiter", "spacecraft"],
+                      props=["airplane", "wing", "cloud", "gear"], ban=["train", "railway", "railroad", "locomotive", "bridge", "ship", "skyscraper", "lighthouse"]),
+    "rail": dict(kw=["train", "railway", "railroad", "rail", "rails", "locomotive", "gauge", "track", "tracks", "wheel", "wheels"],
+                 props=["train", "rails", "gear", "tree"], ban=["airplane", "aircraft", "runway", "jet"]),
+    "bridge": dict(kw=["bridge", "bridges", "suspension", "span", "cable", "cables", "narrows", "viaduct", "aqueduct"],
+                   props=["bridge", "tower", "gear", "tree"], ban=["airplane", "aircraft", "runway"]),
+    "building": dict(kw=["skyscraper", "tower", "building", "chimney", "elevator", "earthquake", "dome", "cathedral", "pyramid", "lighthouse", "dam", "tunnel", "concrete"],
+                     props=["tower", "house", "gear", "tree"], ban=["airplane", "aircraft", "runway", "railway"]),
+}
+GENERIC_PROPS = ["gear", "tree", "house", "tower", "bridge"]
+
+
+def detect_theme(text):
+    """text (topic + title + narration) se theme: sabse zyada keyword-match wali; kuch na mile to None (generic)."""
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    best, score = None, 0
+    for name, th in THEMES.items():
+        sc = sum(words.count(k) for k in th["kw"])
+        if sc > score:
+            best, score = name, sc
+    return best if score >= 2 else None
+
+
+def allowed_props(theme):
+    """Theme ke liye allowed prop types (topical + neutral). theme None => generic."""
+    topical = THEMES[theme]["props"] if theme in THEMES else GENERIC_PROPS
+    return set(topical) | NEUTRAL_PROPS
+
+
+def filter_props(plist, theme):
+    """Off-topic props (jaise aerospace video mein train) hata deta hai."""
+    ok = allowed_props(theme)
+    return [p for p in plist or [] if p.get("type") in ok]
+
+
+def theme_violations(theme, texts):
+    """Locations / scene text mein doosri theme ke banned lafz dhoondta hai (e.g. aerospace mein 'railway')."""
+    if theme not in THEMES:
+        return []
+    blob = " ".join(texts).lower()
+    return [w for w in THEMES[theme]["ban"] if re.search(r"\b" + w + r"s?\b", blob)]
