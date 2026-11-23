@@ -1,5 +1,6 @@
-"""Gemini se har run NAYI "parable explainer" story (jaise "The Difference Between Rich And Poor"):
-chhoti si allegory-duniya, 2-4 fixed characters, 3-8 locations, aur har scene ka cast (kaun, kya action, kya expression, kahan).
+"""Gemini se har run NAYI "engineering & science suspense" story (jaise "Why Perfect Railroads Don't Work"):
+asli engineering failures, physics paradoxes, historical design mysteries; 2-4 fixed characters, 4-8 locations, har scene ka cast.
+Har run par topic RANDOM: category + starting idea + twist-type + protagonist + hook-style (aur purane used topics repeat nahi hote).
 Output: script.json (video ke liye) + story_plan.md (padhne wala plan)."""
 import copy
 import datetime
@@ -16,27 +17,96 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"] if m]
 HISTORY, OUT, PLAN = "history.json", "script.json", "story_plan.md"
 
-# ---- har run mein random ingredients: concept (kis cheez ko samjhana hai) + world (kahani kis duniya mein hai) + format
-CONCEPTS = [
-    "the difference between rich and poor", "why the rich get richer", "employee vs business owner mindset", "how inflation quietly steals your money",
-    "how debt traps people", "saving vs investing", "assets vs liabilities", "how compound interest works", "why taxes exist and who pays them",
-    "how a monopoly squeezes everyone", "supply and demand", "why banks need your trust", "what a stock market really is", "how a recession starts",
-    "why status symbols keep people poor", "time vs money: what is worth more", "why cheap things end up costing more", "how a bubble forms and bursts",
-    "why the middle class feels squeezed", "how credit scores control your life", "the difference between price and value", "why people copy the crowd and lose",
-    "how one small habit beats talent", "how a good reputation becomes real money", "why free things are never free", "how competition lowers prices",
-    "why hard workers are not always the richest", "how opportunity compounds for those who already have it", "scarcity: why rare things cost more",
-    "why saving a little every day beats a big lucky win", "the difference between being busy and being productive", "how trust builds a whole economy",
+# ---- har run mein random ingredients: category -> starting idea (asli, documented cases) + twist-type + protagonist + hook-style + title-format
+# Naya topic jodna ho to bas SEEDS ki kisi category mein ek line add karo. Seeds sirf "shuruaati idea" hain: Gemini unhe badal/behtar bana sakta hai.
+SEEDS = {
+    "engineering failures": [
+        "the Tacoma Narrows Bridge twisting itself apart in 1940",
+        "the London Millennium Bridge that wobbled on opening day",
+        "the Hyatt Regency skywalk collapse caused by one changed rod detail",
+        "the de Havilland Comet airliners and their square windows",
+        "the Liberty ships that cracked in half in cold water",
+        "the warship Vasa that sank minutes after launch in 1628",
+        "the Citicorp Center skyscraper and the secret fix on its bolts",
+        "the Quebec Bridge that fell twice while being built",
+        "the Boston Hancock Tower whose windows kept falling out",
+        "the Mars Climate Orbiter lost to a units mix-up",
+        "the Leaning Tower of Pisa and the surprising way it was straightened",
+        "the Sydney Opera House roof that nobody knew how to build",
+    ],
+    "physics paradoxes & counter-intuitive science": [
+        "Braess's paradox: adding a road makes every traffic jam worse",
+        "why train wheels are cone-shaped, not flat, and how that steers the train",
+        "why a hole in a parachute makes it more stable",
+        "why the tiny hole in an airplane window is essential",
+        "why the Eiffel Tower is taller in summer than in winter",
+        "why long steel rails suddenly buckle on a hot day",
+        "why skyscrapers hide a giant swinging weight at the top",
+        "why dams are curved and not straight",
+        "why the Hoover Dam had cooling pipes inside its concrete",
+        "why a suspension bridge cable hangs in a precise curve",
+        "why ships made of steel float but a small steel ball sinks",
+    ],
+    "historical design mysteries": [
+        "how Egyptians dragged giant pyramid stones across desert sand",
+        "how Brunelleschi built the Florence dome without a wooden frame",
+        "why Roman concrete harbours are still standing after 2000 years",
+        "the Antikythera mechanism, an ancient gear computer",
+        "how Roman aqueducts pushed water uphill with siphons",
+        "the Inca rope bridge that is rebuilt from grass every year",
+        "why Gothic cathedrals needed flying buttresses",
+        "the first Hagia Sophia dome that fell and how the second one survived",
+        "how the Panama Canal beat the sea with locks instead of digging level",
+        "how Dutch engineers keep a country below sea level dry",
+        "the Great Pyramid's nearly perfect alignment to north",
+        "how builders raised the Bell Rock Lighthouse on a reef covered by every tide",
+    ],
+    "rival approaches & technical showdowns": [
+        "Brunel's wide-gauge railway against the narrow standard gauge",
+        "Edison's direct current against Westinghouse and Tesla's alternating current",
+        "Langley's government-funded Aerodrome against the Wright brothers' bicycle shop",
+        "how the Gotthard tunnel crews digging from both ends met almost perfectly in the middle",
+        "the elevator brake that Otis tested by cutting his own rope",
+        "why Concorde grew longer in flight because of heat",
+        "the lighthouse builders who copied an oak tree's shape to survive storms",
+        "Frank Whittle's jet engine that the establishment ignored for years",
+        "why the Hindenburg was filled with hydrogen instead of helium",
+        "Davy's miners' safety lamp against George Stephenson's rival lamp",
+        "why early skyscrapers in Chicago sank into the mud",
+        "the race to build a tunnel under the English Channel from two sides",
+    ],
+    "everyday tech with a hidden secret": [
+        "why railway tracks sit on sharp gravel and not smooth stone",
+        "why manhole covers are round",
+        "why tall chimneys are tapered and wrapped with spiral fins",
+        "why power lines sag and why they are never pulled tight",
+        "why bridge expansion joints look like giant metal teeth",
+        "why airplane wings flex up and survive turbulence",
+        "why elevators in tall towers have giant counterweights",
+        "why a ship's anchor chain is much heavier than the anchor needs",
+        "why tunnels are rarely built with square roofs",
+        "why a building survives an earthquake by swaying instead of resisting",
+        "why a bicycle stays upright and a standing bicycle falls",
+    ],
+}
+TWISTS = [
+    "the obvious fix makes the problem worse", "a hidden physical law nobody respected decides everything",
+    "the cheaper or older-looking approach quietly wins", "one tiny overlooked detail (a bolt, a window shape, a rope) flips the result",
+    "the experts were measuring the wrong thing", "the problem only appears at scale or after time passes",
+    "the rival approach that looked foolish turns out to be correct", "the failure creates a rule every engineer follows today",
 ]
-WORLDS = [
-    "a tiny village where everyone lives inside wooden barrels", "an island that uses coconuts as money", "a medieval market town with cobblestone streets",
-    "a desert oasis where water is the only wealth", "a farm village where chickens lay golden eggs", "a snowy mountain town of bakers and woodcutters",
-    "a floating city of hot-air balloons", "a pirate harbour with a treasure bank", "a tiny space colony on a red planet", "a toy-block city made of colourful bricks",
-    "a jungle village that trades fruit", "a fishing port where boats are the only job", "a mini railway town with one big train station",
-    "a lemonade-stand street where every kid runs a shop", "a bee-hive kingdom of workers and a queen", "a candy-factory town",
+PROTAGONISTS = [
+    "a lone engineer nobody listens to", "a young apprentice who spots the flaw", "a stubborn foreman against the head office",
+    "a night-shift inspector who notices something odd", "two rival designers with opposite ideas", "a veteran builder everyone calls old-fashioned",
+    "a small team racing a brutal deadline", "a curious worker who asks one uncomfortable question",
+]
+HOOKS = [
+    "a mind-breaking puzzle question", "a high-stakes moment seconds before disaster", "a counter-intuitive fact stated flatly",
+    "an impossible-sounding comparison or number", "a bold claim that sounds wrong but is true",
 ]
 FORMATS = [
-    "Title like 'The Difference Between X And Y'", "Title like 'Why X Always Happens'", "Title like 'How X Really Works'",
-    "Title like 'The Truth About X'", "Title like 'What Nobody Tells You About X'",
+    "Title like 'Why Perfect X Don't Work'", "Title like 'The Hidden Law Behind X'", "Title like 'X Should Have Worked. It Didn't.'",
+    "Title like 'What Really Happened To X'", "Title like 'The Engineer Who Was Right'", "Title like 'The Tiny Detail That Broke X'",
 ]
 ANIMS = ["zoom_in", "zoom_out", "slow_zoom_out", "push_in", "pan_left", "pan_right", "shake", "drift"]
 TRANS = ["cut", "flash", "fade", "glitch"]
@@ -53,50 +123,61 @@ HATS = ["none", "cap", "hardhat", "beanie", "slick", "hair", "messy"]
 STYLES = ["tee", "polo", "stripe", "hoodie"]
 SHOTS = ["wide", "medium", "close"]
 POS = ["left", "center", "right"]
-# ---- flat-vector props (props.py) - naya prop jodo to yahan naam likho
-PROP_TYPES = ["chicken", "barrel", "chalkboard", "coins", "eggs", "house", "tree", "sign", "moneybag", "graph", "hand"]
+# ---- flat-vector props (props.py) - naya prop jodo to yahan naam likho (purane chicken/barrel/eggs/moneybag props.py mein hain, bas ab prompt mein nahi)
+PROP_TYPES = ["gear", "train", "rails", "bridge", "tower", "chalkboard", "sign", "graph", "hand", "house", "tree", "coins"]
 PROP_ACTIONS = ["idle", "walk", "run", "peck", "flap", "pop", "fall", "rise", "spin", "shake", "occupied", "hold", "drop"]
 PLACES = ["left", "center", "right", "front", "back"]
+WORDS_MIN, WORDS_MAX = 140, 160           # script ke total words (strict)
+SCENES_MIN, SCENES_MAX = 18, 26         # model thoda upar-neeche ho to bhi chalega, words ka rule hi asli hai
 REACT_ACTIONS = {"shock", "scream", "laugh", "sad", "facepalm", "angry", "celebrate", "think"}
 
-RULES = """You are an autonomous viral YouTube Shorts creator. Write ONE original 'parable explainer' in the style of the
-hit 2D animation 'The Difference Between Rich And Poor': a tiny allegory WORLD with a few round-headed cartoon characters that
-explains, through simple cause-and-effect events, how money / society / economics / psychology really works.
-Every run must use a genuinely new concept, world and plot. English only, very simple spoken words, short punchy sentences,
-one deep calm male narrator who tells the story ('In a village, every person lives in a barrel...'). Never preachy; the lesson
-must come from what HAPPENS in the story, ending in a clever insight.
+RULES = """You are an autonomous viral YouTube Shorts creator. Write ONE original 'engineering & science suspense story' in the style of the
+hit 2D animation 'Why Perfect Railroads Don't Work': a tense, TRUE story about engineering, real-world science, a historical design
+mystery or a technical failure, told with a few round-headed cartoon characters (engineers, workers, inventors). A hidden physical,
+scientific or historical law flips the outcome dramatically at the end. English only, very simple spoken words, short punchy sentences,
+one deep calm male narrator. Never preachy: the lesson must come from what HAPPENS.
+ACCURACY: the story must be a real, well-documented case or a real scientific principle. Use only facts you are sure about; when you are
+not sure of an exact number say 'about' or leave it out. Never invent statistics, quotes or named people: refer to people by role
+('the chief engineer', 'the young apprentice') unless the real name is famous and certain. Never present myths as facts.
 
-LENGTH (strict): 24-30 scenes, 6-9 spoken words per scene, 170-215 words TOTAL. Count before answering.
-HOOK (2 scenes): shows the strange world or asks the big question immediately.
-BODY (18-22 scenes): step-by-step events; each scene = ONE clear visual action; stakes escalate; rules of the world get tested;
-use concrete numbers and objects (e.g. 'two eggs', 'ten days') so the viewer can follow.
-TWIST (4 scenes): surprising turn that reveals the real lesson, then one memorable closing line.
+LENGTH (strict): 20-24 scenes, 6-8 spoken words per scene, 140-160 words TOTAL (about 60 seconds). Count the words before answering.
+Word budget: HOOK ~16 words, CONFLICT ~34, RISING ACTION ~52, CLIMAX & TWIST ~48.
+STRUCTURE (use these exact section labels in the JSON: HOOK, BODY, TWIST):
+HOOK (section HOOK, scenes 1-2, first ~5 seconds): open with a mind-breaking puzzle, a high-stakes moment or a counter-intuitive
+engineering fact. It must create a question the viewer needs answered. No greeting, no 'today we will learn'.
+CONFLICT (section BODY, the next 4-5 scenes): introduce the protagonist (engineer / worker / inventor) who faces a choice that goes AGAINST
+conventional wisdom (the boss, the crowd or the rival says one thing, the protagonist or rival believes another). Make the stakes concrete
+(a bridge, a train, a city, a deadline, a budget).
+RISING ACTION (section BODY, the next 7-9 scenes): the initial assumptions or the rival approach seem to WORK. Success builds, confidence
+grows, tiny warning signs appear. One clear visual action per scene; use concrete numbers and objects ('two bridges', 'ten trains', 'one bolt').
+CLIMAX & TWIST (section TWIST, the last 5-6 scenes): the surprise lands, then reveal the hidden physical / scientific / historical law in one
+plain sentence, show how it flips the outcome, and end with ONE memorable closing line that echoes the hook so the video loops.
 
 CHARACTERS (code draws them, so design them with the given options only): create 2-4 characters (id, name, role) that look clearly
-different from each other: big round beige head, tiny dot eyes, potato-shaped body, thin legs (different shirt colour + hat + hair;
-cap / slick hair / beanie, glasses, MONOCLE, mustache, tie, overalls are fun signature props: e.g. poor man = brown shirt + flat cap,
-rich man = green waistcoat + monocle + tie).
-Keep the same characters for the whole film. Character ids are short lowercase words.
-LOCATIONS: create 4-8 locations. Each has an id and an image prompt (35-60 words) describing ONLY the empty environment of the
-SAME world: stylized 3D-rendered cartoon diorama look, warm daylight, rich detail, a large flat open ground area filling the
-lower 45% of the picture where characters can stand, camera at eye level, vertical 9:16. NO people, NO characters, no text.
-Props, buildings, barrels, animals in the distance are allowed. All locations must feel like one consistent world.
+different from each other: big round beige head, tiny dot eyes, potato-shaped body, thin legs (different shirt colour + hat + hair).
+Engineers wear a hardhat or cap; use glasses, mustache, tie, overalls as signature props (e.g. chief engineer = white shirt + tie + glasses,
+foreman = orange shirt + hardhat + mustache, apprentice = blue overalls + cap). Keep the same characters for the whole film. Ids are short lowercase words.
+LOCATIONS: create 4-6 locations of the SAME real-world setting (e.g. a railway cutting, a bridge construction site, a drafting office, a
+workshop, a shipyard, a canyon). Each has an id and an image prompt (35-60 words) describing ONLY the empty environment: stylized
+3D-rendered cartoon diorama look, warm daylight, rich detail, a large flat open ground area filling the lower 45% of the picture where
+characters can stand, camera at eye level, vertical 9:16. NO people, NO characters, no text. All locations must feel like one consistent place and era.
 PER-SCENE: text (narration), section, loc (a location id), shot (wide | medium | close), cast (1-3 characters visible in the
 scene; each has id, action, emo, pos left|center|right, facing left|right: characters should face each other or the action),
 speaker (id of the character whose mouth moves because they are talking in this line, else empty string; use sparingly),
 anim (camera move), transition (mostly cut: hard cuts like a real animation), emph (1-2 key words from text, empty for HOOK), sfx, props.
-PROPS (flat-vector explainer objects drawn by code, 0-3 per scene, MOST scenes should have at least one so the world feels alive):
-type = chicken (action walk/peck/flap/idle) | barrel (action occupied, text = id of the character standing inside it) | chalkboard
-(text = what is written, e.g. '2 = (egg)' or '1 egg|per day'; icons (egg) (coin) (up) (down); '|' = new line) | coins (text = count e.g. '3')
-| eggs (text = count, add the word gold for golden eggs) | house | tree | sign (text = short protest slogan like 'UNFAIR!', max 14 chars)
-| moneybag | graph (text 'up' or 'down' + optional label like '+300%') | hand (a BIG hand dropping or holding an item from above, text = coin | egg | bag;
-action hold or drop; use it for 2-4 dramatic close-up scenes). place = left | center | right | front | back. Props must illustrate what the
-narration says (narration says 'two eggs' -> eggs prop with text '2'; 'every house' -> house; 'a protest' -> sign).
-Vary shots: mostly medium and wide, 3-5 CLOSE-UP reaction shots (one character, big emotion) right after a surprising event. Let characters REACT (shock, laugh, sad, proud, facepalm, shrug).
+PROPS (flat-vector objects drawn by code, 0-3 per scene, MOST scenes should have at least one so the world feels alive):
+type = gear (action spin | shake(jammed) | idle; text = tiny label) | train (action idle | walk | run; text 'red' or 'blue') | rails (text 'gap',
+'bend' or 'crack' shows a track problem, empty = healthy track) | bridge (action idle | shake = swaying deck | fall = collapsing; text 'collapse' also
+collapses) | tower (a tall building; action idle | shake; text 'lean' = tilted) | chalkboard (text = what is written, e.g. '2 trains|1 track';
+'|' = new line; icons (up) (down) (coin)) | sign (text = short warning like 'DANGER!', max 14 chars) | graph (text 'up' or 'down' + optional label
+like '+300%') | hand (a BIG hand dropping or holding an item from above, text = gear | coin | bag; action hold or drop; use for 2-3 dramatic
+close-ups) | house | tree | coins (text = count). place = left | center | right | front | back. Props must illustrate what the narration says
+(narration says 'the bridge began to sway' -> bridge with action shake; 'the track bent' -> rails text 'bend'; 'a tiny gear' -> hand holding gear).
+Vary shots: mostly medium and wide, 3-5 CLOSE-UP reaction shots (one character, big emotion) right after a surprising event. Let characters REACT.
 Use walk/run only when someone really moves. Show the same characters repeatedly so the viewer follows their story.
-WORLD: one sentence naming the art direction of the environment (palette, materials, mood) used for every location.
-TITLE: 35-70 characters, curiosity-driven. DESCRIPTION: one hook sentence + 3-5 hashtags. TAGS: 6-10 short tags.
-TOPIC: one short, specific premise used for repeat avoidance. music_mood: quirky or chill (or epic/mysterious if it truly fits).
+WORLD: one sentence naming the art direction of the environment (palette, materials, era, mood) used for every location.
+TITLE: 35-70 characters, curiosity-driven (e.g. 'Why Perfect Railroads Don't Work'). DESCRIPTION: one hook sentence + 3-5 hashtags (#engineering #science #history ...).
+TAGS: 6-10 short tags. TOPIC: one short, specific premise used for repeat avoidance. music_mood: mysterious or epic (or quirky/chill if it truly fits).
 Return JSON only."""
 
 
@@ -212,10 +293,10 @@ def finalize(d):
     sc = d["scenes"]
     order = [SECTIONS.index(s["section"]) if s.get("section") in SECTIONS else -1 for s in sc]
     ok = (min(order) >= 0 and order == sorted(order) and order.count(0) >= 1 and order.count(2) >= 2)
-    if not ok:                                              # model ki tarteeb galat -> position se: pehle 2 HOOK, aakhri 4 TWIST
+    if not ok:                                              # model ki tarteeb galat -> position se: pehle 2 HOOK, aakhri 5 TWIST
         n = len(sc)
         for k, s in enumerate(sc):
-            s["section"] = "HOOK" if k < 2 else ("TWIST" if k >= n - 4 else "BODY")
+            s["section"] = "HOOK" if k < 2 else ("TWIST" if k >= n - 5 else "BODY")
     body_cycle = ["push_in", "pan_left", "zoom_in", "drift", "pan_right", "push_in"]
     prev_loc = lids[0]
     for k, s in enumerate(sc):
@@ -259,8 +340,8 @@ def finalize(d):
     first_twist = next(k for k, s in enumerate(sc) if s["section"] == "TWIST")
     sc[first_twist]["transition"] = "flash"
     sc[-1]["anim"] = "slow_zoom_out"
-    d["world"] = re.sub(r"\s+", " ", d.get("world") or "").strip() or "stylized 3D cartoon diorama, warm daylight, saturated colours, soft shadows"
-    d["music_mood"] = _pick(d.get("music_mood"), MOODS, "quirky")
+    d["world"] = re.sub(r"\s+", " ", d.get("world") or "").strip() or "stylized 3D cartoon diorama of a real engineering site, warm daylight, saturated colours, soft shadows"
+    d["music_mood"] = _pick(d.get("music_mood"), MOODS, "mysterious")
     return d
 
 
@@ -269,10 +350,14 @@ def clean(d):
         s["text"] = re.sub(r"\s+", " ", str(s.get("text", ""))).strip()
     d["scenes"] = [s for s in d["scenes"] if s["text"]]
     words = sum(len(s["text"].split()) for s in d["scenes"])
-    if not (20 <= len(d["scenes"]) <= 34 and 150 <= words <= 240):
-        raise ValueError(f"bad size: {len(d['scenes'])} scenes / {words} words (need 24-30 scenes, 170-215 words)")
+    if words > WORDS_MAX:
+        raise ValueError(f"script has {words} words: TOO LONG, cut at least {words - WORDS_MAX} words (need {WORDS_MIN}-{WORDS_MAX} words, {len(d['scenes'])} scenes now)")
+    if words < WORDS_MIN:
+        raise ValueError(f"script has {words} words: TOO SHORT, add at least {WORDS_MIN - words} words (need {WORDS_MIN}-{WORDS_MAX} words, {len(d['scenes'])} scenes now)")
+    if not (SCENES_MIN <= len(d["scenes"]) <= SCENES_MAX):
+        raise ValueError(f"bad size: {len(d['scenes'])} scenes (need {SCENES_MIN}-{SCENES_MAX} scenes, 6-8 words each)")
     if not (2 <= len(d.get("characters") or []) <= 6) or not (3 <= len(d.get("locations") or []) <= 10):
-        raise ValueError("need 2-4 characters and 4-8 locations")
+        raise ValueError("need 2-4 characters and 4-6 locations")
     t = re.sub(r"\s*#\w+", "", d["title"]).strip()           # title mein hashtag main.py lagata hai
     if len(t) > 80:
         t = t[:80].rsplit(" ", 1)[0]
@@ -282,7 +367,7 @@ def clean(d):
         x = re.sub(r"[^\w ]", "", str(x)).strip()
         if x and x.lower() not in [y.lower() for y in tags] and sum(len(y) + 1 for y in tags) + len(x) < 400:
             tags.append(x)
-    d["tags"] = tags[:10] or ["storytime", "animation", "lifelessons", "money"]
+    d["tags"] = tags[:10] or ["engineering", "science", "history", "mystery"]
     return finalize(d)
 
 
@@ -302,7 +387,7 @@ def clean_props(raw, ids):
             txt = _id(txt) if act == "occupied" else ""
         if t == "hand":
             act = act if act in ("hold", "drop") else "hold"
-            txt = txt.lower() if txt.lower() in ("coin", "egg", "bag") else "coin"
+            txt = txt.lower() if txt.lower() in ("gear", "coin", "bag") else "gear"
         out.append(dict(type=t, place=_pick(str(p.get("place", "right")).lower(), PLACES, "right"), action=act, text=txt))
     return out
 
@@ -319,40 +404,44 @@ def _S(text, sec, loc, shot, cast, anim="push_in", trans="cut", sfx="none", emph
     return dict(text=text, section=sec, loc=loc, shot=shot, cast=cast, speaker=speaker, anim=anim, transition=trans, sfx=sfx, emph=emph, props=props or [])
 
 
-# offline test / emergency fallback (ALLOW_FALLBACK=1): original barrel-village parable
+# offline test / emergency fallback (ALLOW_FALLBACK=1): Tacoma Narrows Bridge (140-160 words)
 FALLBACK = {
-    "topic": "the barrel village and the golden egg hens: why the rich get richer", "title": "Why The Rich Keep Getting Richer",
-    "description": "Two neighbours, one hen each, and a lesson about money.\n\n#money #animation #storytime #lifelessons #shorts",
-    "tags": ["money", "animation", "storytime", "lifelessons", "rich", "poor"], "music_mood": "quirky",
-    "world": "stylized 3D cartoon diorama of a sunny barrel village, warm daylight, saturated colours, soft shadows",
+    "topic": "the Tacoma Narrows Bridge twisting itself apart in 1940", "title": "Why This Bridge Tore Itself Apart",
+    "description": "A slim, elegant bridge fell in ordinary wind. The reason is a law engineers once ignored.\n\n#engineering #science #history #mystery #shorts",
+    "tags": ["engineering", "science", "history", "bridge", "mystery", "physics"], "music_mood": "mysterious",
+    "world": "stylized 3D cartoon diorama of a 1940 suspension bridge site over a misty strait, warm daylight, steel blues and rust reds",
     "characters": [
-        dict(id="sam", name="Sam", role="poor farmer", shirt="brown", pants="navy", hair_color="black", hat="cap", hat_color="gray", style="tee", glasses=False, mustache=False, tie=False, overalls=True),
-        dict(id="lord", name="Lord Bram", role="rich landlord", shirt="green", pants="black", hair_color="gray", hat="slick", hat_color="black", style="polo", glasses=False, mustache=False, tie=True, overalls=False, monocle=True),
-        dict(id="mia", name="Mia", role="baker", shirt="red", pants="navy", hair_color="red", hat="beanie", hat_color="yellow", style="stripe", glasses=False, mustache=False, tie=False, overalls=False),
+        dict(id="chief", name="Chief Designer", role="bridge designer", shirt="white", pants="navy", hair_color="gray", hat="none", hat_color="red", style="polo", glasses=True, mustache=False, tie=True, overalls=False, monocle=False),
+        dict(id="foreman", name="Foreman", role="site foreman", shirt="orange", pants="brown", hair_color="black", hat="hardhat", hat_color="yellow", style="tee", glasses=False, mustache=True, tie=False, overalls=False, monocle=False),
+        dict(id="kid", name="Apprentice", role="young apprentice", shirt="blue", pants="navy", hair_color="red", hat="cap", hat_color="gray", style="tee", glasses=False, mustache=False, tie=False, overalls=True, monocle=False),
     ],
     "locations": [
-        dict(id="square", prompt="empty cobblestone village square with wooden barrel houses, a big yellow mansion in the background, blue sky with clouds, stylized 3D cartoon diorama, large flat open ground in lower half"),
-        dict(id="farm", prompt="empty sunny farmyard with a small wooden hen house, fence, haystacks, green hills, stylized 3D cartoon diorama, large flat open ground in lower half"),
-        dict(id="mansion", prompt="empty front yard of a big yellow mansion with red shutters, flower boxes, paved path, stylized 3D cartoon diorama, large flat open ground in lower half"),
-        dict(id="market", prompt="empty market street with wooden stalls and colourful awnings, cobblestones, warm afternoon light, stylized 3D cartoon diorama, large flat open ground in lower half"),
+        dict(id="strait", prompt="empty windy strait shore with a tall steel bridge tower rising from grey water in the distance, misty hills, stylized 3D cartoon diorama, warm daylight, large flat open gravel ground in lower half"),
+        dict(id="office", prompt="empty 1940s drafting office with big blueprint tables, hanging lamps, wooden floor, rolled plans in the corner, stylized 3D cartoon diorama, warm light, large flat open floor in lower half"),
+        dict(id="deck", prompt="empty bridge roadway deck seen from the side with steel railings, cables rising to a tower, grey water far below, stylized 3D cartoon diorama, daylight, large flat open road surface in lower half"),
+        dict(id="shore", prompt="empty rocky shore beside a bridge tower foundation, construction cranes, wooden crates, cloudy sky, stylized 3D cartoon diorama, warm daylight, large flat open ground in lower half"),
     ],
     "scenes": [
-        _S("In this village, everyone starts with one hen.", "HOOK", "square", "wide", [_A("sam", "talk", "neutral", "left"), _A("lord", "talk", "smug", "right", "left")], "zoom_in", "flash", props=[_P("barrel","left","occupied","sam"),_P("chicken","center","idle"),_P("house","back")]),
-        _S("Yet some people end up owning thousands of eggs.", "HOOK", "mansion", "medium", [_A("lord", "celebrate", "proud", "center")], "push_in", props=[_P("hand","center","hold","egg"),_P("eggs","front","pop","gold 5")]),
-        _S("Sam works hard and sells his eggs every morning.", "BODY", "farm", "medium", [_A("sam", "walk", "happy", "center")], "pan_right", props=[_P("chicken","right","walk"),_P("eggs","left","pop","2")]),
-        _S("Every coin he earns, he spends on dinner.", "BODY", "market", "medium", [_A("sam", "talk", "happy", "left"), _A("mia", "smile", "happy", "right", "left")], "push_in", "cut", "sparkle", props=[_P("coins","front","pop","3")]),
-        _S("Lord Bram sells just one egg per day.", "BODY", "mansion", "medium", [_A("lord", "idle", "smug", "center")], "drift", "cut", "none", "one", props=[_P("chalkboard","left","idle","1 (egg)|per day"),_P("chicken","right","peck")]),
-        _S("The rest he saves, and buys another hen.", "BODY", "farm", "medium", [_A("lord", "point", "evil", "left"), _A("sam", "listen", "confused", "right", "left")], "pan_left", "cut", "rise", "another", props=[_P("moneybag","left","shake"),_P("chicken","right","flap")]),
-        _S("Now two hens lay eggs while he sleeps.", "BODY", "mansion", "close", [_A("lord", "sleep", "sleepy", "center")], "zoom_in", "cut", "none", "sleeps", props=[_P("eggs","front","pop","gold 4")]),
-        _S("Sam notices and feels the unfairness burn.", "BODY", "square", "medium", [_A("sam", "angry", "angry", "center", "left")], "shake", "glitch", "buzz", "unfairness", props=[_P("sign","right","shake","UNFAIR!"),_P("barrel","left","occupied","sam")]),
-        _S("But Sam's hen gets tired, and he cannot rest.", "BODY", "farm", "medium", [_A("sam", "sad", "worried", "center")], "push_in", props=[_P("chicken","right","idle"),_P("graph","left","fall","down")]),
-        _S("Within a year, Bram owns twenty hens.", "BODY", "mansion", "wide", [_A("lord", "celebrate", "excited", "center")], "zoom_out", "cut", "thud", "twenty", props=[_P("chicken","left","walk"),_P("chicken","right","peck"),_P("house","back")]),
-        _S("Sam asks him for help, and Bram says yes.", "BODY", "mansion", "medium", [_A("sam", "wave", "worried", "left"), _A("lord", "talk", "smug", "right", "left")], "pan_right", "cut", "knock", "", "lord", props=[_P("hand","center","drop","coin")]),
-        _S("But Sam must work for him, for tiny pay.", "BODY", "farm", "medium", [_A("sam", "walk", "sad", "center")], "drift", props=[_P("coins","front","pop","1"),_P("tree","back")]),
-        _S("The rich did not work harder than Sam.", "TWIST", "square", "close", [_A("lord", "shrug", "smug", "center", "left")], "zoom_in", "flash", "thud", "harder", props=[_P("chalkboard","right","idle","same work|different pay")]),
-        _S("They just let their money work instead.", "TWIST", "market", "medium", [_A("lord", "talk", "proud", "left"), _A("mia", "think", "confused", "right", "left")], "push_in", "cut", "sparkle", "money", props=[_P("graph","right","grow","up +300%"),_P("moneybag","left","shake")]),
-        _S("And that first extra hen changes everything.", "TWIST", "farm", "wide", [_A("sam", "think", "worried", "left"), _A("lord", "celebrate", "excited", "right", "left")], "pan_left", "cut", "rise", "first", props=[_P("chicken","center","flap"),_P("eggs","front","pop","gold 3")]),
-        _S("Remember: save first, and spend what remains.", "TWIST", "square", "wide", [_A("sam", "smile", "proud", "left"), _A("mia", "smile", "happy", "center"), _A("lord", "smile", "happy", "right", "left")], "slow_zoom_out", "cut", "sparkle", "save", props=[_P("coins","front","pop","6"),_P("house","back")]),
+        _S("A giant bridge collapsed in ordinary wind.", "HOOK", "strait", "wide", [_A("foreman", "shock", "scared", "center")], "zoom_in", "flash", "rise", props=[_P("bridge", "back", "fall", "collapse")]),
+        _S("Its engineers had trusted every single calculation.", "HOOK", "office", "medium", [_A("chief", "think", "confused", "center")], "push_in", props=[_P("chalkboard", "right", "idle", "all math|correct")]),
+        _S("Nineteen-forty. The state needed a cheap bridge.", "BODY", "office", "medium", [_A("chief", "talk", "neutral", "left"), _A("foreman", "listen", "neutral", "right", "left")], "pan_right", props=[_P("coins", "front", "pop", "3")]),
+        _S("A deeper, sturdier design cost too much.", "BODY", "office", "close", [_A("chief", "shrug", "smug", "center")], "zoom_in", "cut", "thud", "cost", props=[_P("chalkboard", "left", "idle", "deep = (coin)(coin)(coin)")]),
+        _S("So the designer chose a slimmer, elegant deck.", "BODY", "strait", "wide", [_A("chief", "point", "proud", "left")], "pan_left", props=[_P("bridge", "right", "idle", "")]),
+        _S("The foreman frowned. Slim felt dangerous.", "BODY", "deck", "medium", [_A("foreman", "think", "worried", "center", "left")], "push_in", "cut", "gulp", "dangerous", props=[_P("sign", "right", "shake", "TOO THIN?")]),
+        _S("Opening day: cars crossed, and crowds cheered.", "BODY", "deck", "wide", [_A("kid", "celebrate", "excited", "center")], "zoom_out", "cut", "sparkle", "cheered", props=[_P("train", "left", "walk", "red"), _P("tree", "back", "idle", "")]),
+        _S("Soon workers noticed the deck gently rolling.", "BODY", "deck", "medium", [_A("kid", "point", "surprised", "left"), _A("foreman", "listen", "confused", "right", "left")], "drift", props=[_P("bridge", "back", "shake", "")]),
+        _S("They nicknamed it Galloping Gertie. Drivers loved it.", "BODY", "shore", "medium", [_A("kid", "laugh", "happy", "center")], "pan_right", "cut", "sparkle", "Gertie", props=[_P("graph", "right", "idle", "up +visitors")]),
+        _S("Engineers believed the wobble was harmless.", "BODY", "office", "medium", [_A("chief", "talk", "smug", "left"), _A("kid", "listen", "worried", "right", "left")], "push_in", props=[_P("chalkboard", "right", "idle", "wobble = fine")]),
+        _S("They added cables to calm the motion.", "BODY", "deck", "medium", [_A("foreman", "hold", "neutral", "center")], "pan_left", props=[_P("gear", "right", "spin", "")]),
+        _S("Nothing helped. The waves kept coming back.", "BODY", "deck", "wide", [_A("foreman", "facepalm", "worried", "center")], "shake", "cut", "buzz", "Nothing", props=[_P("bridge", "back", "shake", "")]),
+        _S("Four months later, the wind grew stronger.", "BODY", "strait", "wide", [_A("kid", "shock", "scared", "center")], "zoom_out", "cut", "rise", "stronger", props=[_P("tower", "left", "shake", "")]),
+        _S("Suddenly the deck began twisting like ribbon.", "TWIST", "deck", "wide", [_A("foreman", "scream", "scared", "center", "left")], "shake", "flash", "alarm", "twisting", props=[_P("bridge", "back", "shake", "")]),
+        _S("Each gust pushed in perfect rhythm.", "TWIST", "strait", "medium", [_A("kid", "point", "surprised", "center")], "push_in", "cut", "none", "rhythm", props=[_P("graph", "right", "rise", "up")]),
+        _S("Engineers call this hidden law aeroelastic flutter.", "TWIST", "office", "close", [_A("chief", "think", "surprised", "center", "left")], "zoom_in", "cut", "thud", "flutter", props=[_P("chalkboard", "left", "idle", "wind + rhythm|= flutter")]),
+        _S("The solid slim deck could not shed wind.", "TWIST", "deck", "medium", [_A("chief", "sad", "sad", "center")], "drift", props=[_P("hand", "center", "hold", "gear")]),
+        _S("Steel tore apart, and the bridge fell.", "TWIST", "shore", "wide", [_A("foreman", "shock", "scared", "left"), _A("kid", "shock", "scared", "right", "left")], "shake", "cut", "thud", "fell", props=[_P("bridge", "back", "fall", "collapse")]),
+        _S("Now every big bridge meets a wind tunnel.", "TWIST", "office", "medium", [_A("chief", "talk", "proud", "left"), _A("kid", "smile", "happy", "right", "left")], "push_in", "cut", "sparkle", "wind tunnel", props=[_P("gear", "center", "spin", "TEST")]),
+        _S("Strong bridges let the wind slip through.", "TWIST", "strait", "wide", [_A("chief", "smile", "proud", "left"), _A("foreman", "smile", "happy", "right", "left")], "slow_zoom_out", "cut", "sparkle", "slip through", props=[_P("bridge", "back", "idle", "")]),
     ],
 }
 
@@ -384,21 +473,41 @@ def write_plan(d):
     open(PLAN, "w", encoding="utf-8").write("\n".join(out))
 
 
+def pick_ingredients(used_seeds):
+    """Har call par bilkul naya random combo: category + starting idea (aaj tak use na hua) + twist + protagonist + hook + title-format.
+    20% runs 'wildcard' hote hain: koi seed nahi, Gemini us category ka koi kam-jaana asli case khud chunta hai (isse topics predictable nahi rehte)."""
+    rnd = random.SystemRandom()
+    cat = rnd.choice(list(SEEDS))
+    pool = [x for x in SEEDS[cat] if x not in used_seeds] or SEEDS[cat]
+    wild = rnd.random() < 0.20
+    if wild:
+        idea = (f"Starting idea: NONE. Pick a real, lesser-known, well-documented case from this area yourself: {cat}. "
+                "Avoid the famous textbook examples (Tacoma Narrows, Titanic, Eiffel Tower, Leaning Tower of Pisa).")
+        seed = f"wildcard:{cat}"
+    else:
+        seed = rnd.choice(pool)
+        idea = (f"Starting idea (you may sharpen it or swap it for a different, lesser-known real case of the same kind): {seed}.")
+    spec = (f"TODAY'S RANDOM INGREDIENTS. Area: {cat}. {idea} Climax type: {rnd.choice(TWISTS)}. Protagonist: {rnd.choice(PROTAGONISTS)}. "
+            f"Hook style: {rnd.choice(HOOKS)}. {rnd.choice(FORMATS)}.")
+    return cat, seed, spec
+
+
 def main():
     for p in (OUT, PLAN):
         if os.path.exists(p):
             os.remove(p)
     hist = load_history()
     recent = [h.get("topic", "") for h in hist]
-    d, fb = None, False
+    used_seeds = {h.get("seed") for h in hist if h.get("seed")}
+    d, fb, seed_used = None, False, ""
     rejected = []
     last_validation_error = ""
     if API_KEY:
-        for attempt in range(4):
-            seeds = (f"Inspiration (twist it into something fresh, do not copy literally): concept = {random.choice(CONCEPTS)}; "
-                     f"world = {random.choice(WORLDS)}; {random.choice(FORMATS)}.")
-            prompt = (f"{RULES}\n\n{seeds}\nDo NOT repeat or closely resemble any of these past stories: {recent[-60:] + rejected}\n"
-                      f"STRICT REMINDER: 24-30 scenes, 6-9 spoken words per scene, 170-215 words total; 2-4 characters; 4-8 locations. "
+        for attempt in range(5):
+            cat, seed_txt, spec = pick_ingredients(used_seeds)
+            prompt = (f"{RULES}\n\n{spec}\nDo NOT repeat or closely resemble any of these past stories: {recent[-60:] + rejected}\n\n"
+                      f"STRICT REMINDER: {WORDS_MIN}-{WORDS_MAX} words TOTAL (count them!), 20-24 scenes of 6-8 words, 2-4 characters, 4-6 locations. "
+                      f"Structure: HOOK (2 scenes) -> CONFLICT -> RISING ACTION -> CLIMAX & TWIST with the hidden law. True facts only. "
                       f"{('Your previous response failed: ' + last_validation_error + '. Fix it now. ') if last_validation_error else ''}"
                       "Return JSON only.")
             try:
@@ -407,7 +516,7 @@ def main():
                     rejected.append(cand["topic"])
                     print(f"story attempt {attempt + 1}: too similar to history ({cand['topic']}) -> retry")
                     continue
-                d = cand
+                d, seed_used = cand, seed_txt
                 break
             except Exception as e:
                 last_validation_error = str(e)
@@ -423,7 +532,7 @@ def main():
     write_plan(d)
     print("SCRIPT:", d["title"], f"({len(d['scenes'])} scenes, {sum(len(s['text'].split()) for s in d['scenes'])} words)")
     if not fb and not any(h.get("topic", "").lower() == d["topic"].lower() for h in hist):
-        hist.append({"topic": d["topic"], "title": d["title"], "date": datetime.date.today().isoformat()})
+        hist.append({"topic": d["topic"], "title": d["title"], "seed": seed_used, "date": datetime.date.today().isoformat()})
         json.dump(hist[-1000:], open(HISTORY, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
