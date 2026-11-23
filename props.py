@@ -468,6 +468,12 @@ def hand(c):
     if it.startswith("egg"):
         pts = [(0.05 + 0.13 * math.cos(a) * (1 - 0.14 * math.sin(a)), y + 0.17 * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 30, endpoint=False)]
         c.poly(pts, (252, 248, 236))
+    elif it.startswith("gear"):
+        c.circ(0.05, y, 0.15, (150, 160, 176))
+        c.circ(0.05, y, 0.06, (96, 104, 120))
+        for k in range(8):
+            a = k * math.pi / 4 + c.t
+            c.circ(0.05 + 0.17 * math.cos(a), y + 0.17 * math.sin(a), 0.035, (150, 160, 176), ow=False)
     elif it.startswith("bag") or it.startswith("money"):
         c.ell(0.05, y - 0.02, 0.16, 0.15, (216, 174, 108))
         c.text("$", 0.05, y - 0.02, 0.17, (48, 112, 62))
@@ -477,3 +483,115 @@ def hand(c):
         c.text("$", 0.05, y, 0.13, (190, 128, 20))
         s = 0.5 + 0.5 * math.sin(c.t * 7)
         c.star(0.22, y + 0.13, 0.06 * s)
+
+
+# ============================================================ ENGINEERING PROPS (v7): gear, train, rails, bridge, tower
+@prop("gear", ext=(0.50, 0.50, 0.95, 0.03))
+def gear(c):
+    """Ghoomta gear. action spin/walk/run = tez ghoomta hai, shake = atakta hai (jam), idle = dheere. text = chhota label."""
+    rate = {"spin": 90, "run": 120, "walk": 60, "shake": 0}.get(c.action, 18)
+    ang = math.radians(c.t * rate + (6 * math.sin(c.t * 40) if c.action == "shake" else 0) + c.seed % 20)
+    cx, cy, n = 0.0, 0.46, 12
+    pts = []
+    for k in range(n * 4):
+        r = 0.40 if (k % 4) in (1, 2) else 0.31
+        a = ang + 2 * math.pi * (k - 0.5) / (n * 4)
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    c.poly(pts, (150, 160, 176))
+    c.circ(cx, cy, 0.24, (186, 196, 210), ow=False)
+    for k in range(3):
+        a = ang + k * 2 * math.pi / 3
+        c.line([(cx, cy), (cx + 0.22 * math.cos(a), cy + 0.22 * math.sin(a))], 0.05, (150, 160, 176))
+    c.circ(cx, cy, 0.09, (96, 104, 120))
+    c.circ(cx, cy, 0.035, (222, 228, 238), ow=False)
+    if c.txt:
+        c.text(c.txt[:10], 0.0, 0.93, 0.09, (60, 50, 60))
+
+
+@prop("train", ext=(0.95, 0.95, 0.90, 0.03), speed=0.55)
+def train(c):
+    """Chhoti steam engine. walk/run = pahiye ghoomte hain aur dhuan nikalta hai. text 'blue' ho to neela, warna laal."""
+    body = (64, 104, 190) if "blue" in (c.txt or "").lower() else (196, 62, 56)
+    d = c.d
+    mv = c.action in ("walk", "run")
+    bob = 0.006 * math.sin(c.t * 14) if mv else 0.0
+
+    def box(xa, xb, y0, y1, r, col):                       # x mirror hota hai (facing), baaki sab same
+        x0, x1 = sorted((xa * d, xb * d))
+        c.rrect(x0, y0, x1, y1, r, col)
+
+    box(-0.90, 0.40, 0.10, 0.30, 0.01, (70, 74, 86))                       # chassis
+    box(-0.55, 0.40, 0.22 + bob, 0.58 + bob, 0.12, body)                   # boiler
+    box(-0.90, -0.50, 0.22 + bob, 0.74 + bob, 0.03, shade(body, 0.85))     # cab
+    box(-0.82, -0.60, 0.48 + bob, 0.66 + bob, 0.01, (156, 204, 238))       # window
+    box(0.18, 0.32, 0.56 + bob, 0.80 + bob, 0.02, (60, 60, 68))            # chimney
+    for k in range(3 if mv else 0):                                        # dhuan
+        q = (c.t * 0.9 + k / 3) % 1.0
+        c.circ(d * (0.25 - 0.22 * q), 0.86 + 0.5 * q, 0.05 + 0.10 * q, (236, 238, 244), ow=False)
+    for wx, r in ((-0.62, 0.14), (-0.30, 0.14), (0.0, 0.14), (0.30, 0.10)):
+        c.circ(d * wx, 0.14, r, (48, 50, 58))
+        c.circ(d * wx, 0.14, r * 0.55, (170, 176, 188), ow=False)
+        a = c.t * (6.0 if c.action == "run" else 3.0 if mv else 0.0)
+        c.line([(d * wx - r * 0.6 * math.cos(a), 0.14 - r * 0.6 * math.sin(a)), (d * wx + r * 0.6 * math.cos(a), 0.14 + r * 0.6 * math.sin(a))], 0.018, (48, 50, 58))
+
+
+@prop("rails", ext=(0.95, 0.95, 0.30, 0.03))
+def rails(c):
+    """Patri. text 'gap' / 'bend' / 'crack' ho to patri toot-mur jaati hai (dikhne wala problem)."""
+    t = (c.txt or "").lower()
+    bad = any(k in t for k in ("gap", "bend", "crack", "buckle", "kink"))
+    for k in range(-5, 6):
+        c.rrect(k * 0.17 - 0.035, 0.0, k * 0.17 + 0.035, 0.07, 0.01, (140, 96, 58))
+    def rail(y):
+        pts = []
+        for k in range(-18, 19):
+            x = k * 0.05
+            lift = 0.07 * math.exp(-((x - 0.1) / 0.18) ** 2) * min(1.0, c.t / 0.8) if bad and "gap" not in t else 0.0
+            pts.append((x, y + lift))
+        return pts
+    for y in (0.10, 0.17):
+        p = rail(y)
+        if bad and "gap" in t:
+            c.line([q for q in p if q[0] < -0.05], 0.025, (160, 168, 182), ow=True)
+            c.line([q for q in p if q[0] > 0.05], 0.025, (160, 168, 182), ow=True)
+        else:
+            c.line(p, 0.025, (160, 168, 182), ow=True)
+
+
+@prop("bridge", ext=(0.95, 0.95, 0.98, 0.03))
+def bridge(c):
+    """Suspension bridge. action shake = deck jhoolta hai; fall (ya text 'collapse') = deck toot kar jhuk jaata hai."""
+    fall = c.action == "fall" or "collapse" in (c.txt or "").lower()
+    amp = 0.035 if c.action == "shake" else 0.006
+    ft = max(0.0, c.t - 0.6)
+    def deck_y(x):
+        w = amp * math.sin(c.t * 9 + x * 5)
+        return 0.34 + w - (ft ** 2 * 0.9 * (0.4 + 0.6 * abs(x)) if fall else 0.0)
+    for x in (-0.55, 0.55):
+        c.rrect(x - 0.045, 0.0, x + 0.045, 0.92, 0.01, (176, 82, 70))
+    xs = [i * 0.1 for i in range(-9, 10)]
+    for tx in (-0.55, 0.55):
+        for sgn in (-1, 1):
+            tgt = [x for x in xs if (x - tx) * sgn >= 0 and abs(x - tx) <= 0.5]
+            if tgt:
+                top = 0.92 - 0.12 * 0.0
+                c.line([(tx, top)] + [(x, deck_y(x) + 0.0) for x in tgt[::2]], 0.012, (60, 60, 70))
+    c.line([(x, deck_y(x)) for x in xs], 0.06, (96, 104, 118), ow=True)
+    c.line([(x, deck_y(x) + 0.05) for x in xs], 0.012, (230, 230, 236))
+    if fall and ft > 0.2:
+        c.star(0.0, 0.5, 0.09 * math.sin(min(1.0, ft) * 3))
+
+
+@prop("tower", ext=(0.42, 0.42, 1.45, 0.03))
+def tower(c):
+    """Unchi imaarat. action shake = hilti hai; text 'lean' = jhuki hui."""
+    lean = ("lean" in (c.txt or "").lower())
+    sw = (0.025 * math.sin(c.t * 8) if c.action == "shake" else 0.004 * math.sin(c.t * 1.5)) + (0.12 if lean else 0.0)
+    body = [(-0.28, 0.0), (0.28, 0.0), (0.22 + sw, 1.30), (-0.22 + sw, 1.30)]
+    c.poly(body, (150, 172, 200))
+    for r in range(8):
+        y = 0.12 + r * 0.15
+        s = sw * y / 1.30
+        for cx in (-0.14, 0.0, 0.14):
+            c.rrect(cx - 0.035 + s, y, cx + 0.035 + s, y + 0.08, 0.008, (236, 226, 150) if (r + int(cx * 10) + c.seed) % 3 else (96, 132, 170), ow=False)
+    c.line([(sw, 1.30), (sw, 1.42)], 0.015, (80, 80, 90), ow=True)
